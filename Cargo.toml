@@ -1,0 +1,15 @@
+[package]
+name = "maus-utility"
+version = "1.0.0"
+edition = "2021"
+description = "Autoclicker, Dauerklick, Klickfolgen und Cursor-Info fuer Windows"
+
+[dependencies]
+# keine – nur die Windows-API
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
