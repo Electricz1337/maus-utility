@@ -53,3 +53,7 @@ Manche Spiele mit Anti-Cheat erkennen simulierte Eingaben oder Tastatur-Hooks (f
 ## Lizenz
 
 MIT – siehe [LICENSE](LICENSE).
+
+## Releases
+
+Fertige EXE-Dateien findest du unter **Releases**. Ein neues Release entsteht automatisch, sobald die Versionsnummer in `Cargo.toml` erhöht und auf `main` gepusht wird. GitHub baut die EXE dann selbst (Workflow `.github/workflows/release.yml`).
