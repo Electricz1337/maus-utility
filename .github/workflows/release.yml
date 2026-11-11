@@ -1,0 +1,53 @@
+# Baut die Windows-EXE und veroeffentlicht sie als GitHub-Release.
+# Ausgeloest durch einen Versions-Tag, z. B.:  git tag v1.0.1 && git push origin v1.0.1
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust aktualisieren
+        run: rustup update stable --no-self-update && rustup default stable
+
+      - name: Release bauen
+        run: cargo build --release --locked
+
+      - name: Datei vorbereiten
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item target/release/maus-utility.exe dist/maus-utility.exe
+          Get-FileHash dist/maus-utility.exe -Algorithm SHA256 |
+            ForEach-Object { "$($_.Hash.ToLower())  maus-utility.exe" } |
+            Out-File -Encoding ascii dist/maus-utility.exe.sha256
+
+      - name: Als Build-Artefakt sichern
+        uses: actions/upload-artifact@v4
+        with:
+          name: maus-utility
+          path: dist/*
+
+      - name: GitHub-Release erstellen
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Maus-Utility ${{ github.ref_name }}
+          files: |
+            dist/maus-utility.exe
+            dist/maus-utility.exe.sha256
+          body: |
+            Windows-Build (64 Bit) – einfach `maus-utility.exe` herunterladen und starten.
+
+            **Funktionen:** Autoclicker mit Intervall und Zufall-Offset, Dauerklick, Farb-Trigger mit Toleranz, Klick-Offset und Cooldown, Klickfolgen (speicher- und ladbar), Cursor-Info mit Merkliste (Strg+C), Hell-/Dunkelmodus und Tray-Icon.
+
+            Windows SmartScreen kann beim ersten Start warnen, weil die Datei nicht signiert ist: *Weitere Informationen → Trotzdem ausführen*.
