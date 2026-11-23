@@ -44,8 +44,8 @@ Die fertige Datei liegt danach unter `target\release\maus-utility.exe`.
   - **Schritt-Typen:**
     | Typ | Was passiert |
     |---|---|
-    | Klick | Klick mit Mouse 1 oder 2, an der Position oder (leer) an der Cursorposition |
-    | Warten | Pause für die eingestellte Zeit |
+    | Klick | Klick mit Mouse 1 oder 2, an der Position oder (leer) an der Cursorposition. *Klick-Offset* ±N klickt jedes Mal zufällig bis zu N Pixel daneben |
+    | Warten | Pause für die eingestellte Zeit. *Zufall-Offset* ±Zeit verlängert oder verkürzt jede Pause zufällig, z. B. 1 s ± 200 ms = 0,8 bis 1,2 s |
     | Wenn Farbe, sonst springen | Prüft einmal die Farbe an X/Y. Passt sie, geht es mit dem nächsten Schritt weiter, sonst mit Schritt *Sonst zu* |
     | Auf Farbe warten | Wartet, bis die Farbe erscheint. *Max. warten* 0 = unbegrenzt; bei Zeitablauf geht es zu Schritt *Bei Ablauf* |
     | Zu Schritt springen | Springt zu der angegebenen Schrittnummer |
@@ -55,7 +55,9 @@ Die fertige Datei liegt danach unter `target\release\maus-utility.exe`.
   - *Speichern …* und *Laden …* sichern Makros als `.mausmakro`-Datei, inklusive Loop-Einstellung und Durchläufen. Alte `.mausfolge`-Dateien lassen sich weiterhin laden. Das Format ist Klartext:
     ```
     click 1 500 600                # Mouse 1 an X/Y (ohne X/Y: an der Cursorposition)
+    click 1 500 600 off=5          # dasselbe mit Klick-Offset ±5 Pixel
     wait 1000                      # Millisekunden
+    wait 1000 rnd=200              # 1000 ms mit Zufall-Offset ±200 ms
     ifcolor 700 300 336699 10 1    # X Y Farbe Toleranz Sonst-zu-Schritt
     waitcolor 650 650 FFFFFF 10 5000 0   # X Y Farbe Toleranz Max-ms Bei-Ablauf-Schritt
     goto 1

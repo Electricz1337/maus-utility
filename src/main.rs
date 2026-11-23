@@ -160,6 +160,9 @@ const ID_M_DUR_U: i32 = 528;
 const ID_M_GOTO: i32 = 529;
 const ID_M_ADD: i32 = 530;
 const ID_M_APPLY: i32 = 531;
+const ID_M_OFF: i32 = 532;
+const ID_M_JIT: i32 = 533;
+const ID_M_JIT_U: i32 = 534;
 
 const ID_SEQ_TOGGLE: i32 = 601;
 const ID_THEME: i32 = 602;
@@ -255,6 +258,7 @@ const BTNS: &[Btn] = &[
     b(ID_M_M1, Kind::Segment, 896, 420, 150, true),
     b(ID_M_M2, Kind::Segment, 1054, 420, 150, true),
     b(ID_M_DUR_U, Kind::Dropdown, 1054, 458, 150, true),
+    b(ID_M_JIT_U, Kind::Dropdown, 1054, 496, 150, true),
     b(ID_M_ADD, Kind::Secondary, 816, 534, 190, true),
     b(ID_M_APPLY, Kind::Secondary, 1014, 534, 190, true),
     b(ID_S_SAVE, Kind::Secondary, 816, 584, 190, true),
@@ -320,6 +324,8 @@ const EDS: &[Ed] = &[
     e(ID_M_HEX, 896, 420, 150, "Hex #", 42, "34477A", true),
     e(ID_M_TOL, 1054, 420, 150, "±", 14, "10", true),
     e(ID_M_DUR, 896, 458, 150, "", 0, "1", true),
+    e(ID_M_OFF, 896, 458, 150, "±", 14, "0", true),
+    e(ID_M_JIT, 896, 496, 150, "±", 14, "0", true),
     e(ID_M_GOTO, 896, 496, 150, "Nr.", 24, "1", true),
     e(ID_S_ROUNDS, 1090, 622, 114, "", 0, "0", true),
 ];
@@ -471,6 +477,7 @@ static U_T_INT: AtomicU32 = AtomicU32::new(0);
 static U_S_WAIT: AtomicU32 = AtomicU32::new(1);
 static U_T_COOL: AtomicU32 = AtomicU32::new(1);
 static U_H_DUR: AtomicU32 = AtomicU32::new(1);
+static U_M_JIT: AtomicU32 = AtomicU32::new(0);
 const UNIT_LONG: [&str; 4] = ["Millisekunden", "Sekunden", "Minuten", "Stunden"];
 const UNIT_FACTOR: [f64; 4] = [1.0, 1000.0, 60_000.0, 3_600_000.0];
 
@@ -481,6 +488,7 @@ fn unit_of(id: i32) -> &'static AtomicU32 {
         ID_T_INT_U => &U_T_INT,
         ID_T_COOL_U => &U_T_COOL,
         ID_H_DUR_U => &U_H_DUR,
+        ID_M_JIT_U => &U_M_JIT,
         _ => &U_S_WAIT,
     }
 }
@@ -1018,13 +1026,27 @@ fn run_round(steps: &[Step], alive: &dyn Fn() -> bool) -> bool {
         }
         SEQ_STEP.store(i as i32, SeqCst);
         let flow = match steps[i] {
-            Step::Click { button, pos } => {
-                if !gated_click(button, pos, alive) {
+            Step::Click { button, pos, offset } => {
+                // Klick-Offset: zufaellig bis zu ±offset Pixel neben Position bzw. Cursor
+                let target = if offset > 0 {
+                    let (bx, by) = pos.unwrap_or_else(|| {
+                        let mut p = POINT::default();
+                        unsafe { GetCursorPos(&mut p) };
+                        (p.x, p.y)
+                    });
+                    let o = offset as i64;
+                    Some((bx + rand_pm(o) as i32, by + rand_pm(o) as i32))
+                } else {
+                    pos
+                };
+                if !gated_click(button, target, alive) {
                     return false;
                 }
                 Flow::Next
             }
-            Step::Wait(ms) => {
+            Step::Wait { ms, jitter } => {
+                // Zeit-Offset: zufaellig ±jitter ms
+                let ms = (ms as i64 + rand_pm(jitter as i64)).max(0) as u64;
                 if !sleep_while(ms, alive) {
                     return false;
                 }
@@ -1149,6 +1171,8 @@ fn editor_visible(id: i32) -> bool {
         ID_M_M1 | ID_M_M2 => k == 0,
         ID_M_HEX | ID_M_TOL => k == 2 || k == 3,
         ID_M_DUR | ID_M_DUR_U => k == 1 || k == 3,
+        ID_M_OFF => k == 0,
+        ID_M_JIT | ID_M_JIT_U => k == 1,
         ID_M_GOTO => k >= 2,
         _ => true,
     }
@@ -1167,11 +1191,13 @@ fn editor_labels() -> Vec<(i32, &'static str)> {
         _ => {}
     }
     match k {
+        0 => out.push((458, "Klick-Offset")),
         1 => out.push((458, "Dauer")),
         3 => out.push((458, "Max. warten")),
         _ => {}
     }
     match k {
+        1 => out.push((496, "Zufall-Offset")),
         2 => out.push((496, "Sonst zu")),
         3 => out.push((496, "Bei Ablauf")),
         4 => out.push((496, "Zu Schritt")),
@@ -1182,6 +1208,7 @@ fn editor_labels() -> Vec<(i32, &'static str)> {
 
 fn editor_hint() -> Option<(i32, &'static str)> {
     match M_KIND.load(SeqCst) {
+        0 => Some((458, "Pixel, zufällig")),
         2 | 3 => Some((496, "0 = einfach weiter")),
         _ => None,
     }
@@ -1201,9 +1228,22 @@ fn editor_step() -> Result<Step, &'static str> {
         get_text(ID_M_GOTO).trim().parse::<usize>().map_err(|_| "Bitte bei der Schrittnummer eine Zahl eingeben.")
     };
     let need_pos = || pos.ok_or("Für Farbschritte bitte eine Position (X und Y) eingeben.");
+    let offset = || -> Result<u32, &'static str> {
+        let t = get_text(ID_M_OFF);
+        if t.trim().is_empty() {
+            return Ok(0);
+        }
+        t.trim().parse::<u32>().map(|v| v.min(2000)).map_err(|_| "Bitte beim Klick-Offset eine ganze Zahl (Pixel) eingeben.")
+    };
+    let jitter = || -> Result<u64, &'static str> {
+        if get_text(ID_M_JIT).trim().is_empty() {
+            return Ok(0);
+        }
+        read_dur(ID_M_JIT, ID_M_JIT_U).ok_or("Bitte beim Zufall-Offset eine gültige Zeit eingeben, z. B. 200 oder 0,5.")
+    };
     Ok(match k {
-        0 => Step::Click { button: M_BTN.load(SeqCst), pos },
-        1 => Step::Wait(dur()?),
+        0 => Step::Click { button: M_BTN.load(SeqCst), pos, offset: offset()? },
+        1 => Step::Wait { ms: dur()?, jitter: jitter()? },
         2 => {
             let (rgb, tol) = color()?;
             Step::IfColor { pos: need_pos()?, rgb, tol, else_goto: goto()? }
@@ -1239,7 +1279,7 @@ fn load_editor(st: &Step) {
         set_text(ID_M_HEX, &format!("{:06X}", rgb));
         set_text(ID_M_TOL, &tol.to_string());
     };
-    let set_dur = |ms: u64| {
+    let set_time = |edit: i32, unit_store: &AtomicU32, ms: u64| {
         let unit = if ms > 0 && ms.is_multiple_of(3_600_000) {
             3
         } else if ms > 0 && ms.is_multiple_of(60_000) {
@@ -1249,16 +1289,21 @@ fn load_editor(st: &Step) {
         } else {
             0
         };
-        U_S_WAIT.store(unit as u32, SeqCst);
+        unit_store.store(unit as u32, SeqCst);
         let v = ms as f64 / UNIT_FACTOR[unit];
-        set_text(ID_M_DUR, &format!("{}", v).replace('.', ","));
+        set_text(edit, &format!("{}", v).replace('.', ","));
     };
+    let set_dur = |ms: u64| set_time(ID_M_DUR, &U_S_WAIT, ms);
     match *st {
-        Step::Click { button, pos } => {
+        Step::Click { button, pos, offset } => {
             M_BTN.store(button, SeqCst);
             set_pos(pos);
+            set_text(ID_M_OFF, &offset.to_string());
         }
-        Step::Wait(ms) => set_dur(ms),
+        Step::Wait { ms, jitter } => {
+            set_dur(ms);
+            set_time(ID_M_JIT, &U_M_JIT, jitter);
+        }
         Step::IfColor { pos, rgb, tol, else_goto } => {
             set_pos(Some(pos));
             set_color(rgb, tol);
@@ -2062,7 +2107,7 @@ fn btn_label(id: i32) -> String {
         ID_M_TYPE => KIND_NAMES[M_KIND.load(SeqCst) as usize].into(),
         ID_M_ADD => "+ Als neuer Schritt".into(),
         ID_M_APPLY => "Auswahl ändern".into(),
-        ID_A_INT_U | ID_A_JIT_U | ID_T_INT_U | ID_M_DUR_U | ID_T_COOL_U | ID_H_DUR_U => {
+        ID_A_INT_U | ID_A_JIT_U | ID_T_INT_U | ID_M_DUR_U | ID_M_JIT_U | ID_T_COOL_U | ID_H_DUR_U => {
             let u = unit_of(id).load(SeqCst) as usize;
             UNIT_LONG[u].into()
         }
@@ -2311,7 +2356,7 @@ fn draw_list_item(dis: &DRAWITEMSTRUCT) {
             }
             text(m, &(idx + 1).to_string(), f.small, p.muted, s(10), 0, s(22), h, VC | DT_RIGHT);
             let c = match st {
-                Step::Wait(_) | Step::Goto(_) => p.muted,
+                Step::Wait { .. } | Step::Goto(_) => p.muted,
                 _ => p.text,
             };
             let c = if EN_SEQ.load(SeqCst) { c } else { p.muted };
@@ -2749,7 +2794,7 @@ fn on_command(hwnd: HWND, id: i32, code: u32) {
             INFO_COLOR.store(u32::MAX, SeqCst);
         }
 
-        ID_A_INT_U | ID_A_JIT_U | ID_T_INT_U | ID_M_DUR_U | ID_T_COOL_U | ID_H_DUR_U if clicked => unit_menu(hwnd, id),
+        ID_A_INT_U | ID_A_JIT_U | ID_T_INT_U | ID_M_DUR_U | ID_M_JIT_U | ID_T_COOL_U | ID_H_DUR_U if clicked => unit_menu(hwnd, id),
         ID_A_HK | ID_H_HK | ID_T_HK | ID_S_HK if clicked => start_capture(id),
 
         ID_A_INT | ID_A_JIT | ID_A_X | ID_A_Y if code == EN_CHANGE => read_auto_settings(),

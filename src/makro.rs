@@ -6,9 +6,10 @@
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Step {
     /// Klick mit Maustaste 0 (Mouse 1) oder 1 (Mouse 2), optional an fester Position.
-    Click { button: u32, pos: Option<(i32, i32)> },
-    /// Pause in Millisekunden.
-    Wait(u64),
+    /// `offset` > 0: jedes Mal zufaellig bis zu ±offset Pixel daneben.
+    Click { button: u32, pos: Option<(i32, i32)>, offset: u32 },
+    /// Pause in Millisekunden, `jitter` > 0: jedes Mal zufaellig ±jitter ms.
+    Wait { ms: u64, jitter: u64 },
     /// Prueft einmal die Farbe; passt sie nicht, wird zu `else_goto` gesprungen.
     IfColor { pos: (i32, i32), rgb: u32, tol: u8, else_goto: usize },
     /// Wartet, bis die Farbe erscheint (timeout 0 = unbegrenzt); bei Zeitablauf Sprung zu `else_goto`.
@@ -31,7 +32,7 @@ impl Step {
     pub fn kind(self) -> usize {
         match self {
             Step::Click { .. } => 0,
-            Step::Wait(_) => 1,
+            Step::Wait { .. } => 1,
             Step::IfColor { .. } => 2,
             Step::WaitColor { .. } => 3,
             Step::Goto(_) => 4,
@@ -41,9 +42,18 @@ impl Step {
     /// Eine Zeile im Dateiformat.
     pub fn to_line(self) -> String {
         match self {
-            Step::Click { button, pos: None } => format!("click {}", button + 1),
-            Step::Click { button, pos: Some((x, y)) } => format!("click {} {} {}", button + 1, x, y),
-            Step::Wait(ms) => format!("wait {}", ms),
+            Step::Click { button, pos, offset } => {
+                let mut s = format!("click {}", button + 1);
+                if let Some((x, y)) = pos {
+                    s += &format!(" {} {}", x, y);
+                }
+                if offset > 0 {
+                    s += &format!(" off={}", offset);
+                }
+                s
+            }
+            Step::Wait { ms, jitter: 0 } => format!("wait {}", ms),
+            Step::Wait { ms, jitter } => format!("wait {} rnd={}", ms, jitter),
             Step::IfColor { pos: (x, y), rgb, tol, else_goto } => {
                 format!("ifcolor {} {} {:06X} {} {}", x, y, rgb, tol, else_goto)
             }
@@ -59,7 +69,20 @@ impl Step {
         let lower = line.trim().to_ascii_lowercase();
         let mut it = lower.split_whitespace();
         let cmd = it.next()?;
-        let args: Vec<&str> = it.collect();
+        // Optionen im Format name=wert, alles andere sind feste Argumente
+        let (opts, args): (Vec<&str>, Vec<&str>) = it.partition(|a| a.contains('='));
+        let (mut offset, mut jitter) = (0u32, 0u64);
+        for o in opts {
+            let (key, val) = o.split_once('=')?;
+            match key {
+                "off" => offset = val.parse().ok()?,
+                "rnd" => jitter = val.parse().ok()?,
+                _ => return None,
+            }
+        }
+        if (offset > 0 && cmd != "click") || (jitter > 0 && cmd != "wait") {
+            return None;
+        }
         let int = |i: usize| args.get(i).and_then(|v| v.parse::<i32>().ok());
         let uint = |i: usize| args.get(i).and_then(|v| v.parse::<u64>().ok());
         let color = |i: usize| args.get(i).and_then(|v| parse_hex(v));
@@ -72,9 +95,9 @@ impl Step {
                     _ => return None,
                 };
                 let pos = if args.len() == 3 { Some((int(1)?, int(2)?)) } else { None };
-                Some(Step::Click { button, pos })
+                Some(Step::Click { button, pos, offset })
             }
-            ("wait", 1) => Some(Step::Wait(uint(0)?)),
+            ("wait", 1) => Some(Step::Wait { ms: uint(0)?, jitter }),
             ("ifcolor", 5) => Some(Step::IfColor {
                 pos: (int(0)?, int(1)?),
                 rgb: color(2)?,
@@ -97,9 +120,18 @@ impl Step {
     pub fn describe(self) -> String {
         let target = |n: usize| if n == 0 { "weiter".to_string() } else { format!("→ {}", n) };
         match self {
-            Step::Click { button, pos: None } => format!("Klick  Mouse {}", button + 1),
-            Step::Click { button, pos: Some((x, y)) } => format!("Klick  Mouse {}  ·  {} / {}", button + 1, x, y),
-            Step::Wait(ms) => format!("Warten  {}", fmt_dur(ms)),
+            Step::Click { button, pos, offset } => {
+                let mut s = format!("Klick  Mouse {}", button + 1);
+                if let Some((x, y)) = pos {
+                    s += &format!("  ·  {} / {}", x, y);
+                }
+                if offset > 0 {
+                    s += &format!("  ±{} px", offset);
+                }
+                s
+            }
+            Step::Wait { ms, jitter: 0 } => format!("Warten  {}", fmt_dur(ms)),
+            Step::Wait { ms, jitter } => format!("Warten  {}  ± {}", fmt_dur(ms), fmt_dur(jitter)),
             Step::IfColor { pos: (x, y), rgb, else_goto, .. } => {
                 format!("Wenn #{:06X} bei {} / {}  ·  sonst {}", rgb, x, y, target(else_goto))
             }
@@ -272,9 +304,12 @@ ifcolor 700 300 336699 10 1\r\nwait 500\r\nclick 1 900 200\r\nwait 1000\r\nclick
     #[test]
     fn roundtrip() {
         let steps = vec![
-            Step::Click { button: 0, pos: Some((500, 600)) },
-            Step::Click { button: 1, pos: None },
-            Step::Wait(1500),
+            Step::Click { button: 0, pos: Some((500, 600)), offset: 0 },
+            Step::Click { button: 1, pos: None, offset: 0 },
+            Step::Click { button: 0, pos: Some((10, 20)), offset: 5 },
+            Step::Click { button: 1, pos: None, offset: 3 },
+            Step::Wait { ms: 1500, jitter: 0 },
+            Step::Wait { ms: 1000, jitter: 250 },
             Step::IfColor { pos: (700, 300), rgb: 0x336699, tol: 10, else_goto: 1 },
             Step::WaitColor { pos: (-5, 7), rgb: 0xFFFFFF, tol: 0, timeout: 10_000, else_goto: 0 },
             Step::Goto(2),
@@ -293,9 +328,9 @@ ifcolor 700 300 336699 10 1\r\nwait 500\r\nclick 1 900 200\r\nwait 1000\r\nclick
         assert_eq!(
             f.steps,
             vec![
-                Step::Click { button: 0, pos: None },
-                Step::Wait(1000),
-                Step::Click { button: 1, pos: Some((640, 900)) }
+                Step::Click { button: 0, pos: None, offset: 0 },
+                Step::Wait { ms: 1000, jitter: 0 },
+                Step::Click { button: 1, pos: Some((640, 900)), offset: 0 }
             ]
         );
         assert_eq!(f.bad, 1);
@@ -307,7 +342,7 @@ ifcolor 700 300 336699 10 1\r\nwait 500\r\nclick 1 900 200\r\nwait 1000\r\nclick
         assert_eq!(f.bad, 0);
         assert_eq!(f.looped, Some(true));
         assert_eq!(f.steps.len(), 8);
-        assert_eq!(f.steps[0], Step::Click { button: 0, pos: Some((500, 600)) });
+        assert_eq!(f.steps[0], Step::Click { button: 0, pos: Some((500, 600)), offset: 0 });
         assert!(matches!(f.steps[2], Step::IfColor { pos: (700, 300), rgb: 0x336699, else_goto: 1, .. }));
     }
 
@@ -336,6 +371,24 @@ ifcolor 700 300 336699 10 1\r\nwait 500\r\nclick 1 900 200\r\nwait 1000\r\nclick
             i = advance(i, flow);
         }
         assert_eq!(clicks, vec![(500, 600), (500, 600), (500, 600), (500, 600), (900, 200), (650, 650)]);
+    }
+
+    #[test]
+    fn offsets_in_file_format() {
+        assert_eq!(
+            Step::parse_line("click 1 500 600 off=8"),
+            Some(Step::Click { button: 0, pos: Some((500, 600)), offset: 8 })
+        );
+        assert_eq!(Step::parse_line("CLICK 2 off=4"), Some(Step::Click { button: 1, pos: None, offset: 4 }));
+        assert_eq!(Step::parse_line("wait 2000 rnd=500"), Some(Step::Wait { ms: 2000, jitter: 500 }));
+        assert_eq!(Step::Click { button: 0, pos: Some((1, 2)), offset: 8 }.to_line(), "click 1 1 2 off=8");
+        assert_eq!(Step::Wait { ms: 2000, jitter: 500 }.to_line(), "wait 2000 rnd=500");
+        // falsche oder unpassende Optionen werden abgelehnt
+        assert_eq!(Step::parse_line("wait 100 off=3"), None);
+        assert_eq!(Step::parse_line("click 1 rnd=3"), None);
+        assert_eq!(Step::parse_line("click 1 foo=3"), None);
+        assert_eq!(Step::Wait { ms: 1000, jitter: 200 }.describe(), "Warten  1 s  ± 200 ms");
+        assert_eq!(Step::Click { button: 0, pos: Some((5, 6)), offset: 3 }.describe(), "Klick  Mouse 1  ·  5 / 6  ±3 px");
     }
 
     #[test]
