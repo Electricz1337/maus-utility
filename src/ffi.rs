@@ -546,3 +546,4 @@ pub type EXCEPTION_FILTER = unsafe extern "system" fn(*const EXCEPTION_POINTERS)
 extern "system" {
     pub fn SetUnhandledExceptionFilter(f: EXCEPTION_FILTER) -> usize;
 }
+pub const EM_SETCUEBANNER: u32 = 0x1501;
