@@ -547,3 +547,4 @@ extern "system" {
     pub fn SetUnhandledExceptionFilter(f: EXCEPTION_FILTER) -> usize;
 }
 pub const EM_SETCUEBANNER: u32 = 0x1501;
+pub const LBN_SELCHANGE: u32 = 1;

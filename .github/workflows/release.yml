@@ -42,6 +42,10 @@ jobs:
         if: steps.ver.outputs.skip == 'false'
         run: rustup update stable --no-self-update && rustup default stable
 
+      - name: Tests
+        if: steps.ver.outputs.skip == 'false'
+        run: cargo test --release --locked
+
       - name: Release bauen
         if: steps.ver.outputs.skip == 'false'
         run: cargo build --release --locked
@@ -66,9 +70,10 @@ jobs:
           files: |
             dist/maus-utility.exe
             dist/maus-utility.exe.sha256
+            beispiele/*.mausmakro
           body: |
             Windows-Build (64 Bit) – einfach `maus-utility.exe` herunterladen und starten.
 
-            **Funktionen:** Autoclicker mit Intervall und Zufall-Offset, Dauerklick, Farb-Trigger mit Toleranz, Klick-Offset und Cooldown, Klickfolgen (speicher- und ladbar), Cursor-Info mit Merkliste (Strg+C), Hell-/Dunkelmodus und Tray-Icon.
+            **Funktionen:** Autoclicker mit Intervall und Zufall-Offset, Dauerklick, Farb-Trigger mit Toleranz, Klick-Offset und Cooldown, Makros mit Farbprüfungen und Sprüngen (speicher- und ladbar), Cursor-Info mit Merkliste (Strg+C), Hell-/Dunkelmodus und Tray-Icon.
 
             Windows SmartScreen kann beim ersten Start warnen, weil die Datei nicht signiert ist: *Weitere Informationen → Trotzdem ausführen*.

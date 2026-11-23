@@ -1,6 +1,6 @@
 # Maus-Utility
 
-Autoclicker, Dauerklick, Farb-Trigger, Klickfolgen und Cursor-Info für Windows 10/11. Das Programm verwendet reines Rust mit der Windows-API und GDI+ und keine externen Crates.
+Autoclicker, Dauerklick, Farb-Trigger, Makros und Cursor-Info für Windows 10/11. Das Programm verwendet reines Rust mit der Windows-API und GDI+ und keine externen Crates.
 
 ## Kompilieren
 
@@ -17,11 +17,11 @@ Die fertige Datei liegt danach unter `target\release\maus-utility.exe`.
 | Autoclicker | Klickt mit Mouse 1 oder 2 im eingestellten Intervall, mit optionalem Zufall-Offset | F6 |
 | Dauerklick | Hält Mouse 1 oder 2 gedrückt, bis du erneut drückst oder die eingestellte Zeit abläuft | F7 |
 | Farb-Trigger | Prüft ein Pixel und klickt, sobald dort die Zielfarbe erscheint | F9 |
-| Klickfolge | Eigene Abfolge aus Klicks und Wartezeiten, optional geloopt | F8 |
+| Makro | Eigene Abläufe aus Klicks, Wartezeiten, Farbprüfungen und Sprüngen, optional geloopt | F8 |
 | Cursor-Info | Zeigt X/Y, RGB und Hex unter dem Cursor; Strg+C merkt den Wert | – |
 
 - **Maustaste:** Mouse 1 und Mouse 2 sind eigene Buttons. Der aktive Button ist orange hinterlegt.
-- **Einheiten:** Für Intervall, Zufall-Offset, Cooldown, Prüfintervall, Loslassen nach und Wartezeit wählst du per Dropdown zwischen Millisekunden, Sekunden, Minuten und Stunden. Kommazahlen wie `1,5` gehen auch.
+- **Einheiten:** Für Intervall, Zufall-Offset, Cooldown, Prüfintervall, Loslassen nach und die Zeiten im Makro wählst du per Dropdown zwischen Millisekunden, Sekunden, Minuten und Stunden. Kommazahlen wie `1,5` gehen auch.
 - **Zufall-Offset:** Bei 100 ms Intervall und 20 ms Offset liegt jede Pause zufällig zwischen 80 und 120 ms.
 - **Farb-Trigger:**
   - Position und Zielfarbe trägst du am einfachsten aus der Merkliste ein (siehe Cursor-Info).
@@ -31,17 +31,35 @@ Die fertige Datei liegt danach unter `target\release\maus-utility.exe`.
   - *Cursor zurück* setzt den Mauszeiger nach dem Klick an seine alte Position.
   - *Cooldown* ist eine Pause nach jedem Klick, bevor wieder geprüft wird. 0 bedeutet keine Pause.
   - *Prüfstelle* ist das Pixel, dessen Farbe überwacht wird. *Klickziel* ist die Stelle, an der dann geklickt wird. Bleibt das Klickziel leer, wird an der Prüfstelle geklickt.
-  - *Andere Klicker pausieren* hält Autoclicker und Klickfolge an, sobald die Farbe erkannt wird. Sie laufen erst nach dem Klick und dem Cooldown weiter.
+  - *Andere Klicker pausieren* hält Autoclicker und Makro an, sobald die Farbe erkannt wird. Sie laufen erst nach dem Klick und dem Cooldown weiter.
 - **Dauerklick:** Bei *Loslassen nach* lässt das Programm die Taste nach dieser Zeit automatisch los. 0 bedeutet, sie bleibt gedrückt, bis du den Hotkey erneut drückst.
-- **Positionen:** Autoclicker, Dauerklick und Klickfolge haben ein X/Y-Feld. Sind beide leer, wird an der aktuellen Cursorposition geklickt. Ist eine Position eingetragen, springt der Cursor zum Klicken dorthin und danach wieder zurück. Beim Dauerklick bleibt er dort, bis losgelassen wird.
+- **Positionen:** Autoclicker, Dauerklick und Makro-Klicks haben ein X/Y-Feld. Sind beide leer, wird an der aktuellen Cursorposition geklickt. Ist eine Position eingetragen, springt der Cursor zum Klicken dorthin und danach wieder zurück. Beim Dauerklick bleibt er dort, bis losgelassen wird.
 - **Cursor-Info:**
   1. Schalter „Anzeigen“ einschalten.
   2. Maus auf die gewünschte Stelle bewegen und **Strg+C** drücken. Der Wert landet in der Merkliste.
-  3. Mit „Übernehmen“ überträgst du einen Eintrag als Position an Autoclicker, Dauerklick, Klickfolge oder als Prüfstelle bzw. Klickziel an den Farb-Trigger. Ein Doppelklick setzt direkt die Prüfstelle und Farbe des Farb-Triggers.
+  3. Mit „Übernehmen“ überträgst du einen Eintrag als Position an Autoclicker, Dauerklick, das Makro oder als Prüfstelle bzw. Klickziel an den Farb-Trigger. Ein Doppelklick setzt direkt die Prüfstelle und Farbe des Farb-Triggers.
 
   Strg+C kopiert in anderen Programmen weiterhin ganz normal.
-- **Klickfolge:** Standardmäßig eingeklappt. Mit dem Button oben rechts blendest du sie ein und aus. Neue Schritte landen hinter dem markierten Eintrag, der laufende Schritt ist hervorgehoben. Steht bei *Position* etwas, bekommen neue Klick-Schritte diese Position (`click 1 640 900` in der Datei).
-  - *Speichern …* und *Laden …* sichern Folgen als `.mausfolge`-Datei, inklusive Loop-Einstellung und Durchläufen. Das Format ist Klartext und lässt sich auch von Hand bearbeiten (`click 1`, `click 2`, `wait 1500` in ms).
+- **Makro:** Standardmäßig eingeklappt. Mit dem Button oben rechts blendest du es ein und aus. Oben steht die Schrittliste, darunter der Schritt-Editor.
+  - **Schritt-Typen:**
+    | Typ | Was passiert |
+    |---|---|
+    | Klick | Klick mit Mouse 1 oder 2, an der Position oder (leer) an der Cursorposition |
+    | Warten | Pause für die eingestellte Zeit |
+    | Wenn Farbe, sonst springen | Prüft einmal die Farbe an X/Y. Passt sie, geht es mit dem nächsten Schritt weiter, sonst mit Schritt *Sonst zu* |
+    | Auf Farbe warten | Wartet, bis die Farbe erscheint. *Max. warten* 0 = unbegrenzt; bei Zeitablauf geht es zu Schritt *Bei Ablauf* |
+    | Zu Schritt springen | Springt zu der angegebenen Schrittnummer |
+  - Eine Schrittnummer von 0 bedeutet „einfach weiter“. Eine Nummer hinter dem letzten Schritt beendet den Durchlauf.
+  - **Bearbeiten:** Ein Klick auf einen Schritt lädt ihn in den Editor. *+ Als neuer Schritt* fügt den Editor-Inhalt hinter dem markierten Schritt ein, *Auswahl ändern* überschreibt den markierten Schritt. Beim Verschieben, Einfügen und Entfernen werden Sprungziele automatisch angepasst.
+  - Über *Übernehmen* in der Merkliste kommen Position bzw. Position und Farbe direkt in den Editor.
+  - *Speichern …* und *Laden …* sichern Makros als `.mausmakro`-Datei, inklusive Loop-Einstellung und Durchläufen. Alte `.mausfolge`-Dateien lassen sich weiterhin laden. Das Format ist Klartext:
+    ```
+    click 1 864 899                # Mouse 1 an X/Y (ohne X/Y: an der Cursorposition)
+    wait 1000                      # Millisekunden
+    ifcolor 1117 820 34477A 10 1   # X Y Farbe Toleranz Sonst-zu-Schritt
+    waitcolor 964 964 FFFFFF 10 5000 0   # X Y Farbe Toleranz Max-ms Bei-Ablauf-Schritt
+    goto 1
+    ```
 - **Hinweise:** Der Button unten links klappt eine Kurzhilfe auf. Sie ist standardmäßig eingeklappt. Ist ein Hotkey belegt, erscheint die Warnung trotzdem daneben.
 - **Hotkeys ändern:** Ins Hotkey-Feld klicken und die neue Taste drücken, auch mit Strg, Alt oder Umschalt. Esc bricht ab, Entf entfernt den Hotkey.
 - **Hell/Dunkel:** Der Mond- bzw. Sonnen-Button oben rechts wechselt das Design. Beim Start folgt das Programm der Windows-Einstellung.
@@ -61,9 +79,19 @@ MIT – siehe [LICENSE](LICENSE).
 
 Fertige EXE-Dateien findest du unter **Releases**. Ein neues Release entsteht automatisch, sobald die Versionsnummer in `Cargo.toml` erhöht und auf `main` gepusht wird. GitHub baut die EXE dann selbst (Workflow `.github/workflows/release.yml`).
 
-## Beispiel: Klicken, bis eine Farbe erscheint, dann woanders klicken
+## Beispiel: Angeln am Eisloch
 
-1. **Cursor-Info** einschalten und mit Strg+C drei Stellen merken: die Stelle für die Dauerklicks, das Pixel, das sich färbt, und den Button, der dann gedrückt werden soll.
-2. **Autoclicker:** Den ersten Eintrag über „Übernehmen → Autoclicker: Position“ eintragen und ein Intervall wählen.
-3. **Farb-Trigger:** Das Pixel über „Übernehmen → Farb-Trigger: Prüfstelle + Farbe“ setzen und den Button über „Übernehmen → Farb-Trigger: Klickziel“. „Andere Klicker pausieren“ einschalten und einen Cooldown einstellen, z. B. 2 Sekunden.
-4. Zuerst den Farb-Trigger starten, dann den Autoclicker.
+Im Ordner `beispiele` liegt das fertige Makro `Angeln-Eisloch.mausmakro`. Laden, Loopen ist schon aktiviert, mit F8 starten:
+
+| Nr. | Schritt |
+|---|---|
+| 1 | Klick Mouse 1 auf das Eisloch (864 / 899) |
+| 2 | 1 s warten |
+| 3 | Wenn #34477A bei 1117 / 820 (Eimer voll), sonst zurück zu Schritt 1 |
+| 4 | 0,5 s warten |
+| 5 | Klick auf „Leeren“ (1449 / 401) |
+| 6 | 1 s warten |
+| 7 | Klick auf die Bestätigung (964 / 964) |
+| 8 | 1 s warten, dann beginnt das Makro von vorn |
+
+Die Zeiten in den Schritten 2, 4, 6 und 8 sind die Pausen zwischen den Klicks. Statt fester Wartezeit vor der Bestätigung kann Schritt 6 auch ein „Auf Farbe warten“ sein, das auf die Farbe des Bestätigen-Buttons wartet.

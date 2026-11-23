@@ -1,12 +1,14 @@
-//! Maus-Utility – Autoclicker, Dauerklick, Farb-Trigger, Klickfolgen und Cursor-Info.
+//! Maus-Utility – Autoclicker, Dauerklick, Farb-Trigger, Makros und Cursor-Info.
 //! Reines Win32 + GDI+ ueber FFI, keine externen Crates.
 
 #![windows_subsystem = "windows"]
 #![allow(clippy::too_many_arguments, clippy::missing_safety_doc)]
 
 mod ffi;
+mod makro;
 
 use ffi::*;
+use makro::{Flow, Step, KIND_NAMES};
 use std::ffi::c_void;
 use std::ptr::{null, null_mut};
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicIsize, AtomicU32, AtomicU64, Ordering::SeqCst};
@@ -135,11 +137,6 @@ const ID_I_TOTRIG: i32 = 404;
 const ID_I_CLEAR: i32 = 405;
 
 const ID_S_LIST: i32 = 501;
-const ID_S_ADD1: i32 = 502;
-const ID_S_ADD2: i32 = 503;
-const ID_S_WAIT: i32 = 504;
-const ID_S_WAIT_U: i32 = 505;
-const ID_S_ADDW: i32 = 506;
 const ID_S_UP: i32 = 507;
 const ID_S_DOWN: i32 = 508;
 const ID_S_DEL: i32 = 509;
@@ -150,8 +147,19 @@ const ID_S_HK: i32 = 513;
 const ID_S_GO: i32 = 514;
 const ID_S_SAVE: i32 = 515;
 const ID_S_LOAD: i32 = 516;
-const ID_S_X: i32 = 517;
-const ID_S_Y: i32 = 518;
+// Makro-Editor
+const ID_M_TYPE: i32 = 520;
+const ID_M_X: i32 = 521;
+const ID_M_Y: i32 = 522;
+const ID_M_M1: i32 = 523;
+const ID_M_M2: i32 = 524;
+const ID_M_HEX: i32 = 525;
+const ID_M_TOL: i32 = 526;
+const ID_M_DUR: i32 = 527;
+const ID_M_DUR_U: i32 = 528;
+const ID_M_GOTO: i32 = 529;
+const ID_M_ADD: i32 = 530;
+const ID_M_APPLY: i32 = 531;
 
 const ID_SEQ_TOGGLE: i32 = 601;
 const ID_THEME: i32 = 602;
@@ -173,7 +181,7 @@ const MAGIC: usize = 0x4D41_5553;
 // ═════════════════════════ Layout (logische Pixel bei 96 DPI) ═════════════════════════
 
 const W_COLLAPSED: i32 = 804;
-const W_EXPANDED: i32 = 1156;
+const W_EXPANDED: i32 = 1236;
 const H_COLLAPSED: i32 = 754;
 const H_EXPANDED: i32 = 864;
 
@@ -232,20 +240,22 @@ const BTNS: &[Btn] = &[
     b(ID_I_COPY, Kind::Secondary, 628, 592, 144, false),
     b(ID_I_TOTRIG, Kind::Dropdown, 628, 627, 144, false),
     b(ID_I_CLEAR, Kind::Secondary, 628, 662, 144, false),
-    // Klickfolge
-    b(ID_S_ADD1, Kind::Secondary, 816, 460, 150, true),
-    b(ID_S_ADD2, Kind::Secondary, 974, 460, 150, true),
-    b(ID_S_WAIT_U, Kind::Dropdown, 914, 498, 90, true),
-    b(ID_S_ADDW, Kind::Secondary, 1012, 498, 112, true),
-    b(ID_S_UP, Kind::Secondary, 816, 536, 60, true),
-    b(ID_S_DOWN, Kind::Secondary, 884, 536, 60, true),
-    b(ID_S_DEL, Kind::Secondary, 952, 536, 88, true),
-    b(ID_S_CLEAR, Kind::Secondary, 1048, 536, 76, true),
-    b(ID_S_SAVE, Kind::Secondary, 816, 574, 150, true),
-    b(ID_S_LOAD, Kind::Secondary, 974, 574, 150, true),
-    b(ID_S_LOOP, Kind::Switch, 816, 624, 110, true),
-    b(ID_S_HK, Kind::Hotkey, 900, 662, 108, true),
-    b(ID_S_GO, Kind::Primary, 1016, 662, 108, true),
+    // Makro
+    b(ID_S_UP, Kind::Secondary, 816, 294, 60, true),
+    b(ID_S_DOWN, Kind::Secondary, 884, 294, 60, true),
+    b(ID_S_DEL, Kind::Secondary, 952, 294, 124, true),
+    b(ID_S_CLEAR, Kind::Secondary, 1084, 294, 120, true),
+    b(ID_M_TYPE, Kind::Dropdown, 896, 344, 308, true),
+    b(ID_M_M1, Kind::Segment, 896, 420, 150, true),
+    b(ID_M_M2, Kind::Segment, 1054, 420, 150, true),
+    b(ID_M_DUR_U, Kind::Dropdown, 1054, 458, 150, true),
+    b(ID_M_ADD, Kind::Secondary, 816, 534, 190, true),
+    b(ID_M_APPLY, Kind::Secondary, 1014, 534, 190, true),
+    b(ID_S_SAVE, Kind::Secondary, 816, 584, 190, true),
+    b(ID_S_LOAD, Kind::Secondary, 1014, 584, 190, true),
+    b(ID_S_LOOP, Kind::Switch, 816, 622, 110, true),
+    b(ID_S_HK, Kind::Hotkey, 900, 660, 150, true),
+    b(ID_S_GO, Kind::Primary, 1058, 660, 146, true),
     // Kopfzeile (Position wird dynamisch gesetzt)
     Btn { id: ID_SEQ_TOGGLE, kind: Kind::Ghost, x: 0, y: 15, w: 190, h: 30, seq: false },
     Btn { id: ID_THEME, kind: Kind::Icon, x: 0, y: 12, w: 36, h: 36, seq: false },
@@ -293,11 +303,14 @@ const EDS: &[Ed] = &[
     e(ID_T_OFF, 524, 260, 120, "±", 14, "0", false),
     e(ID_T_COOL, 524, 298, 120, "", 0, "0", false),
     e(ID_T_INT, 524, 336, 120, "", 0, "100", false),
-    // Klickfolge
-    pos(ID_S_X, 880, 422, 118, "X", "Cursor", true),
-    pos(ID_S_Y, 1006, 422, 118, "Y", "", true),
-    e(ID_S_WAIT, 816, 498, 90, "", 0, "1", true),
-    e(ID_S_ROUNDS, 1044, 624, 80, "", 0, "0", true),
+    // Makro-Editor
+    pos(ID_M_X, 896, 382, 150, "X", "Cursor", true),
+    pos(ID_M_Y, 1054, 382, 150, "Y", "", true),
+    e(ID_M_HEX, 896, 420, 150, "Hex #", 42, "34477A", true),
+    e(ID_M_TOL, 1054, 420, 150, "±", 14, "10", true),
+    e(ID_M_DUR, 896, 458, 150, "", 0, "1", true),
+    e(ID_M_GOTO, 896, 496, 150, "Nr.", 24, "1", true),
+    e(ID_S_ROUNDS, 1090, 622, 114, "", 0, "0", true),
 ];
 
 struct ListDef {
@@ -311,7 +324,7 @@ struct ListDef {
 
 const LISTS: &[ListDef] = &[
     ListDef { id: ID_I_LIST, x: 316, y: 592, w: 300, h: 100, seq: false },
-    ListDef { id: ID_S_LIST, x: 816, y: 108, w: 308, h: 304, seq: true },
+    ListDef { id: ID_S_LIST, x: 816, y: 108, w: 388, h: 176, seq: true },
 ];
 
 #[derive(Clone, Copy, PartialEq)]
@@ -338,7 +351,7 @@ const CARDS: &[Card] = &[
     Card { x: 16, y: 316, w: 380, h: 216, title: "Dauerklick", status: St::Hold, seq: false },
     Card { x: 408, y: 60, w: 380, h: 472, title: "Farb-Trigger", status: St::Trig, seq: false },
     Card { x: 16, y: 544, w: 772, h: 162, title: "Cursor-Info", status: St::None, seq: false },
-    Card { x: 800, y: 60, w: 340, h: 646, title: "Klickfolge", status: St::Seq, seq: true },
+    Card { x: 800, y: 60, w: 420, h: 646, title: "Makro", status: St::Seq, seq: true },
 ];
 
 /// style: 0 = normal, 1 = gedaempft, 2 = gedaempft rechtsbuendig
@@ -378,9 +391,8 @@ const LABELS: &[Label] = &[
     l(652, 184, 120, "0–255 je Kanal", 1, false),
     l(652, 260, 120, "Pixel, zufällig", 1, false),
     l(32, 662, 280, "Doppelklick auf Eintrag → Farb-Trigger", 1, false),
-    l(816, 422, 60, "Position", 0, true),
-    l(920, 624, 116, "Durchläufe (0 = ∞)", 2, true),
-    l(816, 662, 80, "Hotkey", 0, true),
+    l(932, 622, 150, "Durchläufe (0 = ∞)", 2, true),
+    l(816, 660, 80, "Hotkey", 0, true),
 ];
 
 // ═════════════════════════ Zustand ═════════════════════════
@@ -438,7 +450,7 @@ fn unit_of(id: i32) -> &'static AtomicU32 {
     }
 }
 
-// Hotkeys: (vk, mods) fuer Autoclicker, Dauerklick, Farb-Trigger, Klickfolge
+// Hotkeys: (vk, mods) fuer Autoclicker, Dauerklick, Farb-Trigger, Makro
 static HOTKEYS: Mutex<[(u32, u32); 4]> = Mutex::new([(0x75, 0), (0x76, 0), (0x78, 0), (0x77, 0)]);
 static HK_FAIL: Mutex<String> = Mutex::new(String::new());
 static CAPTURE: AtomicI32 = AtomicI32::new(0);
@@ -468,7 +480,7 @@ static TRIG_RESTORE: AtomicBool = AtomicBool::new(true);
 static TRIG_HITS: AtomicU64 = AtomicU64::new(0);
 static TRIG_COOLING: AtomicBool = AtomicBool::new(false);
 static TRIG_PAUSE_OTHERS: AtomicBool = AtomicBool::new(true);
-/// Solange gesetzt, halten Autoclicker und Klickfolge vor dem naechsten Klick an.
+/// Solange gesetzt, halten Autoclicker und Makro vor dem naechsten Klick an.
 static PAUSED: AtomicBool = AtomicBool::new(false);
 /// Verhindert, dass sich Klicks verschiedener Funktionen ueberschneiden.
 static INPUT_LOCK: Mutex<()> = Mutex::new(());
@@ -480,13 +492,11 @@ static INFO_Y: AtomicI32 = AtomicI32::new(0);
 static INFO_COLOR: AtomicU32 = AtomicU32::new(u32::MAX);
 static MERK: Mutex<Vec<(i32, i32, u32)>> = Mutex::new(Vec::new());
 
-// Klickfolge
-#[derive(Clone, Copy)]
-enum Step {
-    /// Maustaste (0/1) und optionale Bildschirmposition (sonst aktuelle Cursorposition)
-    Click(u32, Option<(i32, i32)>),
-    Wait(u64),
-}
+// Makro
+/// Typ im Schritt-Editor (Index in KIND_NAMES)
+static M_KIND: AtomicU32 = AtomicU32::new(0);
+/// Maustaste im Schritt-Editor
+static M_BTN: AtomicU32 = AtomicU32::new(0);
 static SEQ: Mutex<Vec<Step>> = Mutex::new(Vec::new());
 static SEQ_RUN: AtomicBool = AtomicBool::new(false);
 static SEQ_GEN: AtomicU32 = AtomicU32::new(0);
@@ -591,25 +601,6 @@ fn parse_hex(text: &str) -> Option<u32> {
         .collect();
     let t = t.strip_prefix("Hex").or_else(|| t.strip_prefix("hex")).unwrap_or(&t);
     if t.len() == 6 { u32::from_str_radix(t, 16).ok() } else { None }
-}
-
-fn fmt_dur(ms: u64) -> String {
-    if ms >= 3_600_000 && ms.is_multiple_of(3_600_000) {
-        format!("{} h", ms / 3_600_000)
-    } else if ms >= 60_000 && ms.is_multiple_of(60_000) {
-        format!("{} min", ms / 60_000)
-    } else if ms >= 1000 {
-        let mut t = format!("{:.3}", ms as f64 / 1000.0);
-        while t.ends_with('0') {
-            t.pop();
-        }
-        if t.ends_with('.') {
-            t.pop();
-        }
-        format!("{} s", t.replace('.', ","))
-    } else {
-        format!("{} ms", ms)
-    }
 }
 
 fn key_name(vk: u32, mods: u32) -> String {
@@ -739,7 +730,7 @@ fn wait_unpaused(alive: &dyn Fn() -> bool) -> bool {
     alive()
 }
 
-/// Klick fuer Autoclicker und Klickfolge: beachtet Pause und Eingabe-Sperre.
+/// Klick fuer Autoclicker und Makro: beachtet Pause und Eingabe-Sperre.
 /// Klicks an einer Position setzen den Cursor danach zurueck.
 fn gated_click(b: u32, pos: Option<(i32, i32)>, alive: &dyn Fn() -> bool) -> bool {
     if !wait_unpaused(alive) {
@@ -904,7 +895,7 @@ fn toggle_seq() {
     }
     let steps = SEQ.lock().unwrap().clone();
     if steps.is_empty() {
-        msg_box("Die Klickfolge ist leer. Füge zuerst Schritte hinzu.");
+        msg_box("Das Makro ist leer. Füge zuerst Schritte hinzu.");
         return;
     }
     let rounds: u32 = if SEQ_LOOP.load(SeqCst) {
@@ -920,33 +911,17 @@ fn toggle_seq() {
     std::thread::spawn(move || {
         let alive = || SEQ_RUN.load(SeqCst) && SEQ_GEN.load(SeqCst) == gen;
         let mut round = 0u32;
-        'outer: loop {
+        while alive() {
             round += 1;
             SEQ_ROUND.store(round, SeqCst);
-            let mut waited = false;
-            for (i, st) in steps.iter().enumerate() {
-                if !alive() {
-                    break 'outer;
-                }
-                SEQ_STEP.store(i as i32, SeqCst);
-                match *st {
-                    Step::Click(b, pos) => {
-                        if !gated_click(b, pos, &alive) {
-                            break 'outer;
-                        }
-                    }
-                    Step::Wait(ms) => {
-                        waited |= ms > 0;
-                        if !sleep_while(ms, &alive) {
-                            break 'outer;
-                        }
-                    }
-                }
+            if !run_round(&steps, &alive) {
+                break;
             }
             if rounds != 0 && round >= rounds {
                 break;
             }
-            if !waited && !sleep_while(10, &alive) {
+            // Schutz vor einer Endlosschleife ganz ohne Pause
+            if !sleep_while(10, &alive) {
                 break;
             }
         }
@@ -955,6 +930,64 @@ fn toggle_seq() {
             SEQ_STEP.store(-1, SeqCst);
         }
     });
+}
+
+fn pixel_matches(pos: (i32, i32), rgb: u32, tol: u8) -> bool {
+    let c = read_pixel(pos.0, pos.1);
+    c != u32::MAX && makro::color_matches(rgb_of(c), rgb, tol)
+}
+
+/// Fuehrt einen Durchlauf des Makros aus. false = abgebrochen.
+fn run_round(steps: &[Step], alive: &dyn Fn() -> bool) -> bool {
+    let mut i = 0usize;
+    while i < steps.len() {
+        if !alive() {
+            return false;
+        }
+        SEQ_STEP.store(i as i32, SeqCst);
+        let flow = match steps[i] {
+            Step::Click { button, pos } => {
+                if !gated_click(button, pos, alive) {
+                    return false;
+                }
+                Flow::Next
+            }
+            Step::Wait(ms) => {
+                if !sleep_while(ms, alive) {
+                    return false;
+                }
+                Flow::Next
+            }
+            Step::IfColor { pos, rgb, tol, else_goto } => {
+                if pixel_matches(pos, rgb, tol) {
+                    Flow::Next
+                } else {
+                    Flow::Jump(else_goto)
+                }
+            }
+            Step::WaitColor { pos, rgb, tol, timeout, else_goto } => {
+                let start = Instant::now();
+                loop {
+                    if pixel_matches(pos, rgb, tol) {
+                        break Flow::Next;
+                    }
+                    if timeout > 0 && start.elapsed() >= Duration::from_millis(timeout) {
+                        break Flow::Jump(else_goto);
+                    }
+                    if !sleep_while(20, alive) {
+                        return false;
+                    }
+                }
+            }
+            Step::Goto(n) => Flow::Jump(n),
+        };
+        // Spruenge kurz bremsen, damit Schleifen ohne Wartezeit die CPU nicht auslasten
+        if matches!(flow, Flow::Jump(n) if n != 0) && !sleep_while(5, alive) {
+            return false;
+        }
+        i = makro::advance(i, flow);
+    }
+    true
 }
 
 // ───── Listen ─────
@@ -981,27 +1014,46 @@ fn add_step(st: Step) {
     let mut v = SEQ.lock().unwrap();
     let sel = list_sel(ID_S_LIST);
     let idx = if sel >= 0 && (sel as usize) < v.len() { sel as usize + 1 } else { v.len() };
+    makro::renumber_after_insert(&mut v, idx);
     v.insert(idx, st);
     let n = v.len();
     drop(v);
     fill_list(ID_S_LIST, n, idx as i32);
 }
 
+fn replace_step(st: Step) {
+    let mut v = SEQ.lock().unwrap();
+    let sel = list_sel(ID_S_LIST);
+    if sel < 0 || sel as usize >= v.len() {
+        drop(v);
+        msg_box("Wähle zuerst in der Liste den Schritt aus, der geändert werden soll.");
+        return;
+    }
+    v[sel as usize] = st;
+    let n = v.len();
+    drop(v);
+    fill_list(ID_S_LIST, n, sel);
+}
+
 fn edit_seq(id: i32) {
     let mut v = SEQ.lock().unwrap();
     let sel = list_sel(ID_S_LIST);
     let valid = sel >= 0 && (sel as usize) < v.len();
+    let i = sel.max(0) as usize;
     let new_sel = match id {
         ID_S_DEL if valid => {
-            v.remove(sel as usize);
+            v.remove(i);
+            makro::renumber_after_remove(&mut v, i);
             sel.min(v.len() as i32 - 1)
         }
         ID_S_UP if valid && sel > 0 => {
-            v.swap(sel as usize, sel as usize - 1);
+            v.swap(i, i - 1);
+            makro::renumber_after_swap(&mut v, i, i - 1);
             sel - 1
         }
-        ID_S_DOWN if valid && (sel as usize) + 1 < v.len() => {
-            v.swap(sel as usize, sel as usize + 1);
+        ID_S_DOWN if valid && i + 1 < v.len() => {
+            v.swap(i, i + 1);
+            makro::renumber_after_swap(&mut v, i, i + 1);
             sel + 1
         }
         ID_S_CLEAR => {
@@ -1015,21 +1067,170 @@ fn edit_seq(id: i32) {
     fill_list(ID_S_LIST, n, new_sel);
 }
 
-// ───── Klickfolgen speichern / laden ─────
+// ───── Schritt-Editor ─────
 
-const SEQ_FILTER: &str = "Klickfolge (*.mausfolge)\0*.mausfolge\0Textdatei (*.txt)\0*.txt\0Alle Dateien (*.*)\0*.*\0\0";
+/// Ist ein Editor-Feld beim aktuell gewaehlten Schritt-Typ sichtbar?
+fn editor_visible(id: i32) -> bool {
+    let k = M_KIND.load(SeqCst);
+    match id {
+        ID_M_X | ID_M_Y => k == 0 || k == 2 || k == 3,
+        ID_M_M1 | ID_M_M2 => k == 0,
+        ID_M_HEX | ID_M_TOL => k == 2 || k == 3,
+        ID_M_DUR | ID_M_DUR_U => k == 1 || k == 3,
+        ID_M_GOTO => k >= 2,
+        _ => true,
+    }
+}
+
+/// Beschriftungen links neben den Editor-Zeilen (abhaengig vom Typ).
+fn editor_labels() -> Vec<(i32, &'static str)> {
+    let k = M_KIND.load(SeqCst);
+    let mut out = vec![(344, "Typ")];
+    if editor_visible(ID_M_X) {
+        out.push((382, "Position"));
+    }
+    match k {
+        0 => out.push((420, "Maustaste")),
+        2 | 3 => out.push((420, "Farbe")),
+        _ => {}
+    }
+    match k {
+        1 => out.push((458, "Dauer")),
+        3 => out.push((458, "Max. warten")),
+        _ => {}
+    }
+    match k {
+        2 => out.push((496, "Sonst zu")),
+        3 => out.push((496, "Bei Ablauf")),
+        4 => out.push((496, "Zu Schritt")),
+        _ => {}
+    }
+    out
+}
+
+fn editor_hint() -> Option<(i32, &'static str)> {
+    match M_KIND.load(SeqCst) {
+        2 | 3 => Some((496, "0 = einfach weiter")),
+        _ => None,
+    }
+}
+
+/// Liest den Schritt aus dem Editor.
+fn editor_step() -> Result<Step, &'static str> {
+    let k = M_KIND.load(SeqCst);
+    let pos = read_pos(ID_M_X, ID_M_Y).map_err(|_| "Bitte bei Position X und Y ausfüllen oder beide leer lassen.")?;
+    let color = || -> Result<(u32, u8), &'static str> {
+        let rgb = parse_hex(&get_text(ID_M_HEX)).ok_or("Bitte die Farbe als Hex-Code eingeben, z. B. 34477A.")?;
+        let tol = get_text(ID_M_TOL).trim().parse::<u32>().unwrap_or(0).min(255) as u8;
+        Ok((rgb, tol))
+    };
+    let dur = || read_dur(ID_M_DUR, ID_M_DUR_U).ok_or("Bitte eine gültige Zeit eingeben, z. B. 1 oder 0,5.");
+    let goto = || -> Result<usize, &'static str> {
+        get_text(ID_M_GOTO).trim().parse::<usize>().map_err(|_| "Bitte bei der Schrittnummer eine Zahl eingeben.")
+    };
+    let need_pos = || pos.ok_or("Für Farbschritte bitte eine Position (X und Y) eingeben.");
+    Ok(match k {
+        0 => Step::Click { button: M_BTN.load(SeqCst), pos },
+        1 => Step::Wait(dur()?),
+        2 => {
+            let (rgb, tol) = color()?;
+            Step::IfColor { pos: need_pos()?, rgb, tol, else_goto: goto()? }
+        }
+        3 => {
+            let (rgb, tol) = color()?;
+            Step::WaitColor { pos: need_pos()?, rgb, tol, timeout: dur()?, else_goto: goto()? }
+        }
+        _ => {
+            let n = goto()?;
+            if n == 0 {
+                return Err("Beim Springen bitte eine Schrittnummer ab 1 eingeben.");
+            }
+            Step::Goto(n)
+        }
+    })
+}
+
+/// Zeigt einen Schritt im Editor an.
+fn load_editor(st: &Step) {
+    M_KIND.store(st.kind() as u32, SeqCst);
+    let set_pos = |p: Option<(i32, i32)>| match p {
+        Some((x, y)) => {
+            set_text(ID_M_X, &x.to_string());
+            set_text(ID_M_Y, &y.to_string());
+        }
+        None => {
+            set_text(ID_M_X, "");
+            set_text(ID_M_Y, "");
+        }
+    };
+    let set_color = |rgb: u32, tol: u8| {
+        set_text(ID_M_HEX, &format!("{:06X}", rgb));
+        set_text(ID_M_TOL, &tol.to_string());
+    };
+    let set_dur = |ms: u64| {
+        let unit = if ms > 0 && ms.is_multiple_of(3_600_000) {
+            3
+        } else if ms > 0 && ms.is_multiple_of(60_000) {
+            2
+        } else if ms.is_multiple_of(1000) || ms >= 10_000 {
+            1
+        } else {
+            0
+        };
+        U_S_WAIT.store(unit as u32, SeqCst);
+        let v = ms as f64 / UNIT_FACTOR[unit];
+        set_text(ID_M_DUR, &format!("{}", v).replace('.', ","));
+    };
+    match *st {
+        Step::Click { button, pos } => {
+            M_BTN.store(button, SeqCst);
+            set_pos(pos);
+        }
+        Step::Wait(ms) => set_dur(ms),
+        Step::IfColor { pos, rgb, tol, else_goto } => {
+            set_pos(Some(pos));
+            set_color(rgb, tol);
+            set_text(ID_M_GOTO, &else_goto.to_string());
+        }
+        Step::WaitColor { pos, rgb, tol, timeout, else_goto } => {
+            set_pos(Some(pos));
+            set_color(rgb, tol);
+            set_dur(timeout);
+            set_text(ID_M_GOTO, &else_goto.to_string());
+        }
+        Step::Goto(n) => set_text(ID_M_GOTO, &n.to_string()),
+    }
+    apply_visibility();
+}
+
+fn kind_menu(hwnd: HWND) {
+    let mut rc = RECT::default();
+    unsafe { GetWindowRect(item(ID_M_TYPE), &mut rc) };
+    let cur = M_KIND.load(SeqCst) as i32;
+    let items: Vec<(i32, &str, bool)> =
+        KIND_NAMES.iter().enumerate().map(|(i, t)| (i as i32 + 1, *t, i as i32 == cur)).collect();
+    let cmd = popup(hwnd, &items, rc.left, rc.bottom + s(2));
+    if (1..=KIND_NAMES.len() as i32).contains(&cmd) {
+        M_KIND.store(cmd as u32 - 1, SeqCst);
+        apply_visibility();
+    }
+}
+
+// ───── Makros speichern / laden ─────
+
+const SEQ_FILTER: &str = "Makro (*.mausmakro; *.mausfolge)\0*.mausmakro;*.mausfolge\0Textdatei (*.txt)\0*.txt\0Alle Dateien (*.*)\0*.*\0\0";
 
 /// Zeigt den Speichern- oder Oeffnen-Dialog und liefert den gewaehlten Pfad.
 fn file_dialog(hwnd: HWND, save: bool) -> Option<std::path::PathBuf> {
     let filter: Vec<u16> = SEQ_FILTER.encode_utf16().collect();
     let mut file = [0u16; 1024];
     if save {
-        for (i, c) in "Klickfolge.mausfolge".encode_utf16().enumerate() {
+        for (i, c) in "Makro.mausmakro".encode_utf16().enumerate() {
             file[i] = c;
         }
     }
-    let title = wide(if save { "Klickfolge speichern" } else { "Klickfolge laden" });
-    let ext = wide("mausfolge");
+    let title = wide(if save { "Makro speichern" } else { "Makro laden" });
+    let ext = wide("mausmakro");
     let mut ofn: OPENFILENAMEW = unsafe { std::mem::zeroed() };
     ofn.lStructSize = std::mem::size_of::<OPENFILENAMEW>() as u32;
     ofn.hwndOwner = hwnd;
@@ -1051,63 +1252,15 @@ fn file_dialog(hwnd: HWND, save: bool) -> Option<std::path::PathBuf> {
 fn save_seq(hwnd: HWND) {
     let steps = SEQ.lock().unwrap().clone();
     if steps.is_empty() {
-        msg_box("Die Klickfolge ist leer – es gibt nichts zu speichern.");
+        msg_box("Das Makro ist leer – es gibt nichts zu speichern.");
         return;
     }
     let Some(path) = file_dialog(hwnd, true) else { return };
-    let mut out = String::from("# Maus-Utility Klickfolge\r\n");
-    out += &format!("loop={}\r\n", SEQ_LOOP.load(SeqCst) as u8);
-    out += &format!("rounds={}\r\n", get_text(ID_S_ROUNDS).trim().parse::<u32>().unwrap_or(0));
-    for st in &steps {
-        match *st {
-            Step::Click(b, None) => out += &format!("click {}\r\n", b + 1),
-            Step::Click(b, Some((x, y))) => out += &format!("click {} {} {}\r\n", b + 1, x, y),
-            Step::Wait(ms) => out += &format!("wait {}\r\n", ms),
-        }
-    }
+    let rounds = get_text(ID_S_ROUNDS).trim().parse::<u32>().unwrap_or(0);
+    let out = makro::write_file(&steps, SEQ_LOOP.load(SeqCst), rounds);
     if let Err(e) = std::fs::write(&path, out) {
         msg_box(&format!("Speichern fehlgeschlagen:\n{}", e));
     }
-}
-
-/// Liest eine gespeicherte Klickfolge. Unbekannte Zeilen werden uebersprungen.
-fn parse_seq(text: &str) -> (Vec<Step>, Option<bool>, Option<u32>, usize) {
-    let (mut steps, mut looped, mut rounds, mut bad) = (Vec::new(), None, None, 0);
-    for line in text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')) {
-        let lower = line.to_ascii_lowercase();
-        if let Some(v) = lower.strip_prefix("loop=") {
-            looped = Some(v.trim() == "1");
-        } else if let Some(v) = lower.strip_prefix("rounds=") {
-            rounds = v.trim().parse().ok();
-        } else if let Some(v) = lower.strip_prefix("click") {
-            let parts: Vec<&str> = v.split_whitespace().collect();
-            let btn = match parts.first() {
-                Some(&"1") => Some(0),
-                Some(&"2") => Some(1),
-                _ => None,
-            };
-            let pos = match parts.len() {
-                1 => Some(None),
-                3 => match (parts[1].parse::<i32>(), parts[2].parse::<i32>()) {
-                    (Ok(x), Ok(y)) => Some(Some((x, y))),
-                    _ => None,
-                },
-                _ => None,
-            };
-            match (btn, pos) {
-                (Some(b), Some(pos)) => steps.push(Step::Click(b, pos)),
-                _ => bad += 1,
-            }
-        } else if let Some(v) = lower.strip_prefix("wait") {
-            match v.trim().parse::<u64>() {
-                Ok(ms) => steps.push(Step::Wait(ms)),
-                Err(_) => bad += 1,
-            }
-        } else {
-            bad += 1;
-        }
-    }
-    (steps, looped, rounds, bad)
 }
 
 fn load_seq(hwnd: HWND) {
@@ -1119,24 +1272,24 @@ fn load_seq(hwnd: HWND) {
             return;
         }
     };
-    let (steps, looped, rounds, bad) = parse_seq(&text);
-    if steps.is_empty() {
-        msg_box("In dieser Datei wurde keine gültige Klickfolge gefunden.");
+    let f = makro::parse_file(&text);
+    if f.steps.is_empty() {
+        msg_box("In dieser Datei wurde kein gültiges Makro gefunden.");
         return;
     }
     SEQ_RUN.store(false, SeqCst);
-    let n = steps.len();
-    *SEQ.lock().unwrap() = steps;
+    let n = f.steps.len();
+    *SEQ.lock().unwrap() = f.steps;
     fill_list(ID_S_LIST, n, -1);
-    if let Some(lp) = looped {
+    if let Some(lp) = f.looped {
         SEQ_LOOP.store(lp, SeqCst);
     }
-    if let Some(r) = rounds {
+    if let Some(r) = f.rounds {
         set_text(ID_S_ROUNDS, &r.to_string());
     }
     invalidate_buttons();
-    if bad > 0 {
-        msg_box(&format!("{} unbekannte Zeile(n) wurden übersprungen.", bad));
+    if f.bad > 0 {
+        msg_box(&format!("{} unbekannte Zeile(n) wurden übersprungen.", f.bad));
     }
 }
 
@@ -1188,23 +1341,32 @@ fn merk_menu(hwnd: HWND) {
             (0, "", false),
             (3, "Autoclicker: Position", false),
             (4, "Dauerklick: Position", false),
-            (5, "Klickfolge: Position", false),
+            (0, "", false),
+            (5, "Makro: Position", false),
+            (6, "Makro: Position + Farbe", false),
         ],
         rc.left,
         rc.bottom + s(2),
     );
-    let Some((x, y, _)) = merk_selected() else { return };
+    let Some((x, y, c)) = merk_selected() else { return };
     let target = match cmd {
         1 => return merk_to_trigger(),
         2 => (ID_T_TX, ID_T_TY),
         3 => (ID_A_X, ID_A_Y),
         4 => (ID_H_X, ID_H_Y),
-        5 => {
+        5 | 6 => {
             if !SEQ_OPEN.load(SeqCst) {
                 SEQ_OPEN.store(true, SeqCst);
                 apply_layout(hwnd);
             }
-            (ID_S_X, ID_S_Y)
+            if cmd == 6 {
+                set_text(ID_M_HEX, &format!("{:06X}", rgb_of(c)));
+                if !matches!(M_KIND.load(SeqCst), 2 | 3) {
+                    M_KIND.store(2, SeqCst);
+                    apply_visibility();
+                }
+            }
+            (ID_M_X, ID_M_Y)
         }
         _ => return,
     };
@@ -1217,7 +1379,7 @@ fn merk_menu(hwnd: HWND) {
 fn register_hotkeys() {
     let hwnd = main_hwnd();
     let keys = *HOTKEYS.lock().unwrap();
-    let names = ["Autoclicker", "Dauerklick", "Farb-Trigger", "Klickfolge"];
+    let names = ["Autoclicker", "Dauerklick", "Farb-Trigger", "Makro"];
     let mut failed = Vec::new();
     for (i, (vk, mods)) in keys.iter().enumerate() {
         unsafe {
@@ -1652,7 +1814,7 @@ const HELP_LEFT: [&str; 3] = [
 const HELP_RIGHT: [&str; 3] = [
     "Hotkey ändern: Feld anklicken, Taste drücken. Esc = abbrechen, Entf = keiner.",
     "Loslassen nach 0 = erst per Hotkey. Cooldown 0 = keine Pause.",
-    "Andere pausieren: Autoclicker/Klickfolge warten bis Ende des Cooldowns.",
+    "Andere pausieren: Autoclicker/Makro warten bis Ende des Cooldowns.",
 ];
 
 fn paint_main(hwnd: HWND) {
@@ -1691,7 +1853,7 @@ fn paint_main(hwnd: HWND) {
                 g.ellipse(x, cy - d / 2.0, d, d, if *on { p.accent } else { p.input_border });
             }
             let focus = FOCUS_ED.load(SeqCst);
-            for ed in EDS.iter().filter(|e| open || !e.seq) {
+            for ed in EDS.iter().filter(|e| shown(e.id, e.seq)) {
                 let border = if ed.id == focus { p.accent } else { p.input_border };
                 g.rrect(sf(ed.x), sf(ed.y), sf(ed.w), sf(30), sf(8), Some(p.input), Some(border));
             }
@@ -1709,7 +1871,8 @@ fn paint_main(hwnd: HWND) {
                 g.line(sf(658), sf(170), sf(676), sf(152), sf(1) * 1.5, p.muted);
             }
             if open {
-                g.line(sf(816), sf(614), sf(1124), sf(614), 1.0, p.border);
+                g.line(sf(816), sf(334), sf(1204), sf(334), 1.0, p.border);
+                g.line(sf(816), sf(574), sf(1204), sf(574), 1.0, p.border);
             }
             if INFO_OPEN.load(SeqCst) {
                 let cw = rc.right as f32;
@@ -1742,6 +1905,14 @@ fn paint_main(hwnd: HWND) {
             text(m, t, f.small, if *on { p.accent } else { p.muted }, right - tw, s(c.y + 12), *tw, s(26), VC);
         }
 
+        if open {
+            for (y, lb) in editor_labels() {
+                text(m, lb, f.normal, p.text, s(816), s(y), s(78), s(30), VC);
+            }
+            if let Some((y, hint)) = editor_hint() {
+                text(m, hint, f.small, p.muted, s(1058), s(y), s(146), s(30), VC);
+            }
+        }
         for lb in LABELS.iter().filter(|l| open || !l.seq) {
             let (font, color, flags) = match lb.style {
                 0 => (f.normal, p.text, VC),
@@ -1751,7 +1922,7 @@ fn paint_main(hwnd: HWND) {
             text(m, lb.text, font, color, s(lb.x), s(lb.y), s(lb.w), s(30), flags);
         }
 
-        for ed in EDS.iter().filter(|e| (open || !e.seq) && !e.prefix.is_empty()) {
+        for ed in EDS.iter().filter(|e| shown(e.id, e.seq) && !e.prefix.is_empty()) {
             text(m, ed.prefix, f.normal, p.muted, s(ed.x + 10), s(ed.y), s(ed.pw + 4), s(30), VC);
         }
 
@@ -1787,11 +1958,14 @@ fn btn_def(id: i32) -> Option<&'static Btn> {
 fn btn_label(id: i32) -> String {
     let running = |b: bool, on: &str, off: &str| if b { on.to_string() } else { off.to_string() };
     match id {
-        ID_A_M1 | ID_H_M1 | ID_T_M1 => "Mouse 1".into(),
-        ID_A_M2 | ID_H_M2 | ID_T_M2 => "Mouse 2".into(),
-        ID_A_INT_U | ID_A_JIT_U | ID_T_INT_U | ID_S_WAIT_U | ID_T_COOL_U | ID_H_DUR_U => {
+        ID_A_M1 | ID_H_M1 | ID_T_M1 | ID_M_M1 => "Mouse 1".into(),
+        ID_A_M2 | ID_H_M2 | ID_T_M2 | ID_M_M2 => "Mouse 2".into(),
+        ID_M_TYPE => KIND_NAMES[M_KIND.load(SeqCst) as usize].into(),
+        ID_M_ADD => "+ Als neuer Schritt".into(),
+        ID_M_APPLY => "Auswahl ändern".into(),
+        ID_A_INT_U | ID_A_JIT_U | ID_T_INT_U | ID_M_DUR_U | ID_T_COOL_U | ID_H_DUR_U => {
             let u = unit_of(id).load(SeqCst) as usize;
-            if id == ID_S_WAIT_U { ["ms", "s", "min", "h"][u].into() } else { UNIT_LONG[u].into() }
+            UNIT_LONG[u].into()
         }
         ID_A_HK | ID_H_HK | ID_T_HK | ID_S_HK => {
             if CAPTURE.load(SeqCst) == id {
@@ -1814,9 +1988,6 @@ fn btn_label(id: i32) -> String {
         ID_I_TOTRIG => "Übernehmen".into(),
         ID_T_PAUSE => "Andere Klicker pausieren".into(),
         ID_I_CLEAR => "Leeren".into(),
-        ID_S_ADD1 => "+ Mouse 1".into(),
-        ID_S_ADD2 => "+ Mouse 2".into(),
-        ID_S_ADDW => "+ Warten".into(),
         ID_S_UP => "↑".into(),
         ID_S_DOWN => "↓".into(),
         ID_S_DEL => "Entfernen".into(),
@@ -1824,7 +1995,7 @@ fn btn_label(id: i32) -> String {
         ID_S_SAVE => "Speichern …".into(),
         ID_S_LOAD => "Laden …".into(),
         ID_INFO_TOGGLE => running(INFO_OPEN.load(SeqCst), "Hinweise ausblenden", "Hinweise einblenden"),
-        ID_SEQ_TOGGLE => running(SEQ_OPEN.load(SeqCst), "Klickfolge ausblenden", "Klickfolge einblenden"),
+        ID_SEQ_TOGGLE => running(SEQ_OPEN.load(SeqCst), "Makro ausblenden", "Makro einblenden"),
         _ => String::new(),
     }
 }
@@ -1837,6 +2008,8 @@ fn btn_active(id: i32) -> bool {
         ID_H_M2 => HOLD_SEL.load(SeqCst) == 1,
         ID_T_M1 => TRIG_BTN.load(SeqCst) == 0,
         ID_T_M2 => TRIG_BTN.load(SeqCst) == 1,
+        ID_M_M1 => M_BTN.load(SeqCst) == 0,
+        ID_M_M2 => M_BTN.load(SeqCst) == 1,
         ID_A_GO => AUTO_RUN.load(SeqCst),
         ID_H_GO => HOLD_ON.load(SeqCst),
         ID_T_GO => TRIG_RUN.load(SeqCst),
@@ -2010,18 +2183,20 @@ fn draw_list_item(dis: &DRAWITEMSTRUCT) {
                 } else if selected {
                     g.rrect(sf(2), sf(2), wf - sf(4), hf - sf(4), sf(6), Some(p.sel), None);
                 }
-                if let Step::Click(..) = st {
+                if let Some(rgb) = st.color() {
+                    g.rrect(sf(36), hf / 2.0 - sf(5), sf(10), sf(10), sf(3), Some(rgb), Some(p.input_border));
+                } else if let Step::Click { .. } = st {
                     g.ellipse(sf(38), hf / 2.0 - sf(3), sf(6), sf(6), p.accent);
                 } else {
                     g.ellipse(sf(38), hf / 2.0 - sf(3), sf(6), sf(6), p.input_border);
                 }
             }
             text(m, &(idx + 1).to_string(), f.small, p.muted, s(10), 0, s(22), h, VC | DT_RIGHT);
-            let (t, c) = match st {
-                Step::Click(b, None) => (format!("Klick  Mouse {}", b + 1), p.text),
-                Step::Click(b, Some((x, y))) => (format!("Klick  Mouse {}   ·  X {}  Y {}", b + 1, x, y), p.text),
-                Step::Wait(ms) => (format!("Warten  {}", fmt_dur(ms)), p.muted),
+            let c = match st {
+                Step::Wait(_) | Step::Goto(_) => p.muted,
+                _ => p.text,
             };
+            let t = st.describe();
             let font = if running { f.btn } else { f.normal };
             text(m, &t, font, if running { p.accent } else { c }, s(52), 0, w - s(60), h, VC);
         }
@@ -2138,20 +2313,34 @@ fn outer_size(cw: i32, ch: i32) -> (i32, i32) {
     (rc.right - rc.left, rc.bottom - rc.top)
 }
 
+/// Ist ein Steuerelement gerade sichtbar (Makro eingeklappt? passender Schritt-Typ?)
+fn shown(id: i32, seq: bool) -> bool {
+    (!seq || SEQ_OPEN.load(SeqCst)) && editor_visible(id)
+}
+
+/// Blendet Makro-Bereich und Editor-Felder passend ein und aus.
+fn apply_visibility() {
+    unsafe {
+        let vis = |id: i32, seq: bool| if shown(id, seq) { SW_SHOW } else { SW_HIDE };
+        for bt in BTNS.iter().filter(|b| b.seq) {
+            ShowWindow(item(bt.id), vis(bt.id, true));
+        }
+        for ed in EDS.iter().filter(|e| e.seq) {
+            ShowWindow(item(ed.id), vis(ed.id, true));
+        }
+        for li in LISTS.iter().filter(|l| l.seq) {
+            ShowWindow(item(li.id), vis(li.id, true));
+        }
+        InvalidateRect(main_hwnd(), null(), 0);
+    }
+    invalidate_buttons();
+}
+
 fn apply_layout(hwnd: HWND) {
     let open = SEQ_OPEN.load(SeqCst);
     let cw = if open { W_EXPANDED } else { W_COLLAPSED };
+    apply_visibility();
     unsafe {
-        let show = if open { SW_SHOW } else { SW_HIDE };
-        for bt in BTNS.iter().filter(|b| b.seq) {
-            ShowWindow(item(bt.id), show);
-        }
-        for ed in EDS.iter().filter(|e| e.seq) {
-            ShowWindow(item(ed.id), show);
-        }
-        for li in LISTS.iter().filter(|l| l.seq) {
-            ShowWindow(item(li.id), show);
-        }
         MoveWindow(item(ID_THEME), s(cw - 16 - 36), s(12), s(36), s(36), 1);
         MoveWindow(item(ID_SEQ_TOGGLE), s(cw - 16 - 36 - 8 - 190), s(15), s(190), s(30), 1);
         let ch = if INFO_OPEN.load(SeqCst) { H_EXPANDED } else { H_COLLAPSED };
@@ -2272,7 +2461,7 @@ fn tray_update_tip(hwnd: HWND) {
         tip.push_str("\nFarb-Trigger aktiv");
     }
     if SEQ_RUN.load(SeqCst) {
-        tip.push_str("\nKlickfolge läuft");
+        tip.push_str("\nMakro läuft");
     }
     let mut last = TRAY_TIP.lock().unwrap();
     if *last != tip {
@@ -2322,7 +2511,7 @@ fn tray_menu(hwnd: HWND) {
             (TM_AUTO, "Autoclicker", AUTO_RUN.load(SeqCst)),
             (TM_HOLD, "Dauerklick", HOLD_ON.load(SeqCst)),
             (TM_TRIG, "Farb-Trigger", TRIG_RUN.load(SeqCst)),
-            (TM_SEQ, "Klickfolge", SEQ_RUN.load(SeqCst)),
+            (TM_SEQ, "Makro", SEQ_RUN.load(SeqCst)),
             (0, "", false),
             (TM_EXIT, "Beenden", false),
         ],
@@ -2441,11 +2630,11 @@ fn on_command(hwnd: HWND, id: i32, code: u32) {
             INFO_COLOR.store(u32::MAX, SeqCst);
         }
 
-        ID_A_INT_U | ID_A_JIT_U | ID_T_INT_U | ID_S_WAIT_U | ID_T_COOL_U | ID_H_DUR_U if clicked => unit_menu(hwnd, id),
+        ID_A_INT_U | ID_A_JIT_U | ID_T_INT_U | ID_M_DUR_U | ID_T_COOL_U | ID_H_DUR_U if clicked => unit_menu(hwnd, id),
         ID_A_HK | ID_H_HK | ID_T_HK | ID_S_HK if clicked => start_capture(id),
 
         ID_A_INT | ID_A_JIT | ID_A_X | ID_A_Y if code == EN_CHANGE => read_auto_settings(),
-        ID_T_HEX if code == EN_CHANGE => unsafe {
+        ID_T_HEX | ID_M_HEX if code == EN_CHANGE => unsafe {
             InvalidateRect(hwnd, null(), 0);
         },
         _ if code == EN_SETFOCUS && EDS.iter().any(|e| e.id == id) => {
@@ -2457,14 +2646,23 @@ fn on_command(hwnd: HWND, id: i32, code: u32) {
             unsafe { InvalidateRect(hwnd, null(), 0) };
         }
 
-        ID_S_ADD1 | ID_S_ADD2 if clicked => match read_pos(ID_S_X, ID_S_Y) {
-            Ok(pos) => add_step(Step::Click((id == ID_S_ADD2) as u32, pos)),
-            Err(()) => msg_box("Klickfolge: Bitte bei Position X und Y ausfüllen oder beide Felder leer lassen."),
+        ID_M_TYPE if clicked => kind_menu(hwnd),
+        ID_M_M1 | ID_M_M2 if clicked => M_BTN.store((id == ID_M_M2) as u32, SeqCst),
+        ID_M_ADD if clicked => match editor_step() {
+            Ok(st) => add_step(st),
+            Err(e) => msg_box(e),
         },
-        ID_S_ADDW if clicked => match read_dur(ID_S_WAIT, ID_S_WAIT_U) {
-            Some(ms) => add_step(Step::Wait(ms)),
-            None => msg_box("Bitte eine gültige Wartezeit eingeben, z. B. 10 oder 0,5."),
+        ID_M_APPLY if clicked => match editor_step() {
+            Ok(st) => replace_step(st),
+            Err(e) => msg_box(e),
         },
+        ID_S_LIST if code == LBN_SELCHANGE => {
+            let sel = list_sel(ID_S_LIST);
+            let st = SEQ.lock().unwrap().get(sel.max(0) as usize).copied();
+            if let Some(st) = st.filter(|_| sel >= 0) {
+                load_editor(&st);
+            }
+        }
         ID_S_UP | ID_S_DOWN | ID_S_DEL | ID_S_CLEAR if clicked => edit_seq(id),
         ID_S_SAVE if clicked => save_seq(hwnd),
         ID_S_LOAD if clicked => load_seq(hwnd),

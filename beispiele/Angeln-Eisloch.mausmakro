@@ -1,0 +1,27 @@
+# Maus-Utility Makro – Angeln am Eisloch (wasletztepreis.io)
+#
+# Ablauf:
+#  1  Auf das Eisloch klicken (auswerfen / einholen)
+#  2  1 Sekunde warten
+#  3  Ist der Eimer voll (Popup-Farbe #34477A bei 1117 / 820)?
+#     Nein -> zurück zu Schritt 1 und weiter angeln
+#     Ja   -> weiter mit Schritt 4
+#  4  0,5 Sekunden warten
+#  5  Auf "Leeren" klicken
+#  6  1 Sekunde warten
+#  7  Auf den Bestätigen-Button klicken
+#  8  1 Sekunde warten, dann beginnt das Makro von vorn (Loopen)
+#
+# Positionen, Farbe und Wartezeiten lassen sich im Programm anpassen.
+#
+# click TASTE [X Y] | wait MS | ifcolor X Y RRGGBB TOL SONST | waitcolor X Y RRGGBB TOL MAX_MS SONST | goto N
+loop=1
+rounds=0
+click 1 864 899
+wait 1000
+ifcolor 1117 820 34477A 10 1
+wait 500
+click 1 1449 401
+wait 1000
+click 1 964 964
+wait 1000

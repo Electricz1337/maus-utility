@@ -1,8 +1,8 @@
 [package]
 name = "maus-utility"
-version = "1.1.0"
+version = "1.2.0"
 edition = "2021"
-description = "Autoclicker, Dauerklick, Klickfolgen und Cursor-Info fuer Windows"
+description = "Autoclicker, Dauerklick, Farb-Trigger, Makros und Cursor-Info fuer Windows"
 
 [dependencies]
 # keine – nur die Windows-API

@@ -1,3 +1,5 @@
 /target
 maus-utility-absturz.txt
 *.mausfolge
+*.mausmakro
+!beispiele/*.mausmakro
