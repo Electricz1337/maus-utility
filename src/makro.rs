@@ -265,15 +265,17 @@ pub fn renumber_after_swap(steps: &mut [Step], a: usize, b: usize) {
 mod tests {
     use super::*;
 
-    const ANGELN: &str = include_str!("../beispiele/Angeln-Eisloch.mausmakro");
+    /// Beispiel: klicken, bis an einer Stelle eine Farbe erscheint, dann zwei Buttons bestaetigen.
+    const BEISPIEL: &str = "# Beispiel\r\nloop=1\r\nrounds=0\r\nclick 1 500 600\r\nwait 1000\r\n\
+ifcolor 700 300 336699 10 1\r\nwait 500\r\nclick 1 900 200\r\nwait 1000\r\nclick 1 650 650\r\nwait 1000\r\n";
 
     #[test]
     fn roundtrip() {
         let steps = vec![
-            Step::Click { button: 0, pos: Some((864, 899)) },
+            Step::Click { button: 0, pos: Some((500, 600)) },
             Step::Click { button: 1, pos: None },
             Step::Wait(1500),
-            Step::IfColor { pos: (1117, 820), rgb: 0x34477A, tol: 10, else_goto: 1 },
+            Step::IfColor { pos: (700, 300), rgb: 0x336699, tol: 10, else_goto: 1 },
             Step::WaitColor { pos: (-5, 7), rgb: 0xFFFFFF, tol: 0, timeout: 10_000, else_goto: 0 },
             Step::Goto(2),
         ];
@@ -301,20 +303,19 @@ mod tests {
 
     #[test]
     fn example_file_is_valid() {
-        let f = parse_file(ANGELN);
+        let f = parse_file(BEISPIEL);
         assert_eq!(f.bad, 0);
         assert_eq!(f.looped, Some(true));
-        assert_eq!(f.steps[0], Step::Click { button: 0, pos: Some((864, 899)) });
-        assert!(matches!(f.steps[2], Step::IfColor { pos: (1117, 820), rgb: 0x34477A, else_goto: 1, .. }));
-        assert!(f.steps.contains(&Step::Click { button: 0, pos: Some((1449, 401)) }));
-        assert!(f.steps.contains(&Step::Click { button: 0, pos: Some((964, 964)) }));
+        assert_eq!(f.steps.len(), 8);
+        assert_eq!(f.steps[0], Step::Click { button: 0, pos: Some((500, 600)) });
+        assert!(matches!(f.steps[2], Step::IfColor { pos: (700, 300), rgb: 0x336699, else_goto: 1, .. }));
     }
 
-    /// Simuliert den Ablauf des Beispiel-Makros: erst wird geangelt, bis die Farbe da ist,
-    /// dann wird geleert und bestaetigt.
+    /// Simuliert den Ablauf des Beispiel-Makros: erst wird geklickt, bis die Farbe da ist,
+    /// dann werden die beiden Buttons gedrueckt.
     #[test]
     fn example_flow() {
-        let steps = parse_file(ANGELN).steps;
+        let steps = parse_file(BEISPIEL).steps;
         let mut clicks = Vec::new();
         let mut i = 0;
         let mut checks = 0;
@@ -326,15 +327,15 @@ mod tests {
                 }
                 Step::IfColor { rgb, tol, else_goto, .. } => {
                     checks += 1;
-                    // die ersten 3 Pruefungen: Eimer noch nicht voll
-                    let seen = if checks > 3 { 0x34477A } else { 0x101010 };
+                    // erst bei der 4. Pruefung ist die Farbe da
+                    let seen = if checks > 3 { 0x336699 } else { 0x101010 };
                     if color_matches(seen, rgb, tol) { Flow::Next } else { Flow::Jump(else_goto) }
                 }
                 _ => Flow::Next,
             };
             i = advance(i, flow);
         }
-        assert_eq!(clicks, vec![(864, 899), (864, 899), (864, 899), (864, 899), (1449, 401), (964, 964)]);
+        assert_eq!(clicks, vec![(500, 600), (500, 600), (500, 600), (500, 600), (900, 200), (650, 650)]);
     }
 
     #[test]

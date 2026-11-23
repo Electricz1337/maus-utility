@@ -54,12 +54,13 @@ Die fertige Datei liegt danach unter `target\release\maus-utility.exe`.
   - Über *Übernehmen* in der Merkliste kommen Position bzw. Position und Farbe direkt in den Editor.
   - *Speichern …* und *Laden …* sichern Makros als `.mausmakro`-Datei, inklusive Loop-Einstellung und Durchläufen. Alte `.mausfolge`-Dateien lassen sich weiterhin laden. Das Format ist Klartext:
     ```
-    click 1 864 899                # Mouse 1 an X/Y (ohne X/Y: an der Cursorposition)
+    click 1 500 600                # Mouse 1 an X/Y (ohne X/Y: an der Cursorposition)
     wait 1000                      # Millisekunden
-    ifcolor 1117 820 34477A 10 1   # X Y Farbe Toleranz Sonst-zu-Schritt
-    waitcolor 964 964 FFFFFF 10 5000 0   # X Y Farbe Toleranz Max-ms Bei-Ablauf-Schritt
+    ifcolor 700 300 336699 10 1    # X Y Farbe Toleranz Sonst-zu-Schritt
+    waitcolor 650 650 FFFFFF 10 5000 0   # X Y Farbe Toleranz Max-ms Bei-Ablauf-Schritt
     goto 1
     ```
+- **Ein/Aus-Schalter:** Jede Karte (Autoclicker, Dauerklick, Farb-Trigger, Makro) hat oben rechts einen Schalter. Ausgeschaltet wird die Funktion gestoppt, ihr Hotkey freigegeben (die Taste funktioniert dann wieder normal in anderen Programmen) und die Karte gesperrt.
 - **Hinweise:** Der Button unten links klappt eine Kurzhilfe auf. Sie ist standardmäßig eingeklappt. Ist ein Hotkey belegt, erscheint die Warnung trotzdem daneben.
 - **Hotkeys ändern:** Ins Hotkey-Feld klicken und die neue Taste drücken, auch mit Strg, Alt oder Umschalt. Esc bricht ab, Entf entfernt den Hotkey.
 - **Hell/Dunkel:** Der Mond- bzw. Sonnen-Button oben rechts wechselt das Design. Beim Start folgt das Programm der Windows-Einstellung.
@@ -79,19 +80,17 @@ MIT – siehe [LICENSE](LICENSE).
 
 Fertige EXE-Dateien findest du unter **Releases**. Ein neues Release entsteht automatisch, sobald die Versionsnummer in `Cargo.toml` erhöht und auf `main` gepusht wird. GitHub baut die EXE dann selbst (Workflow `.github/workflows/release.yml`).
 
-## Beispiel: Angeln am Eisloch
-
-Im Ordner `beispiele` liegt das fertige Makro `Angeln-Eisloch.mausmakro`. Laden, Loopen ist schon aktiviert, mit F8 starten:
+## Beispiel: Klicken, bis eine Farbe erscheint, dann bestätigen
 
 | Nr. | Schritt |
 |---|---|
-| 1 | Klick Mouse 1 auf das Eisloch (864 / 899) |
+| 1 | Klick Mouse 1 auf die Arbeitsstelle |
 | 2 | 1 s warten |
-| 3 | Wenn #34477A bei 1117 / 820 (Eimer voll), sonst zurück zu Schritt 1 |
+| 3 | Wenn die Zielfarbe an der Prüfstelle erscheint, weiter, sonst zurück zu Schritt 1 |
 | 4 | 0,5 s warten |
-| 5 | Klick auf „Leeren“ (1449 / 401) |
+| 5 | Klick auf den ersten Button |
 | 6 | 1 s warten |
-| 7 | Klick auf die Bestätigung (964 / 964) |
-| 8 | 1 s warten, dann beginnt das Makro von vorn |
+| 7 | Klick auf den Bestätigen-Button |
+| 8 | 1 s warten, dann beginnt das Makro von vorn (Loopen an) |
 
-Die Zeiten in den Schritten 2, 4, 6 und 8 sind die Pausen zwischen den Klicks. Statt fester Wartezeit vor der Bestätigung kann Schritt 6 auch ein „Auf Farbe warten“ sein, das auf die Farbe des Bestätigen-Buttons wartet.
+Die Wartezeiten sind die Pausen zwischen den Klicks. Statt fester Wartezeit vor der Bestätigung kann Schritt 6 auch ein „Auf Farbe warten“ sein.

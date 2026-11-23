@@ -70,7 +70,6 @@ jobs:
           files: |
             dist/maus-utility.exe
             dist/maus-utility.exe.sha256
-            beispiele/*.mausmakro
           body: |
             Windows-Build (64 Bit) – einfach `maus-utility.exe` herunterladen und starten.
 

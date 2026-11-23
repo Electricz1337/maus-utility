@@ -164,6 +164,12 @@ const ID_M_APPLY: i32 = 531;
 const ID_SEQ_TOGGLE: i32 = 601;
 const ID_THEME: i32 = 602;
 const ID_INFO_TOGGLE: i32 = 603;
+// Ein/Aus-Schalter in den Kartenkoepfen (Reihenfolge = Kartenindex)
+const ID_EN_AUTO: i32 = 701;
+const ID_EN_HOLD: i32 = 702;
+const ID_EN_TRIG: i32 = 703;
+const ID_EN_SEQ: i32 = 704;
+const ID_ENABLE: [i32; 4] = [ID_EN_AUTO, ID_EN_HOLD, ID_EN_TRIG, ID_EN_SEQ];
 
 const TM_SHOW: i32 = 1001;
 const TM_AUTO: i32 = 1002;
@@ -256,6 +262,11 @@ const BTNS: &[Btn] = &[
     b(ID_S_LOOP, Kind::Switch, 816, 622, 110, true),
     b(ID_S_HK, Kind::Hotkey, 900, 660, 150, true),
     b(ID_S_GO, Kind::Primary, 1058, 660, 146, true),
+    // Ein/Aus-Schalter in den Kartenkoepfen
+    Btn { id: ID_EN_AUTO, kind: Kind::Switch, x: 344, y: 70, w: 36, h: 30, seq: false },
+    Btn { id: ID_EN_HOLD, kind: Kind::Switch, x: 344, y: 326, w: 36, h: 30, seq: false },
+    Btn { id: ID_EN_TRIG, kind: Kind::Switch, x: 736, y: 70, w: 36, h: 30, seq: false },
+    Btn { id: ID_EN_SEQ, kind: Kind::Switch, x: 1168, y: 70, w: 36, h: 30, seq: true },
     // Kopfzeile (Position wird dynamisch gesetzt)
     Btn { id: ID_SEQ_TOGGLE, kind: Kind::Ghost, x: 0, y: 15, w: 190, h: 30, seq: false },
     Btn { id: ID_THEME, kind: Kind::Icon, x: 0, y: 12, w: 36, h: 36, seq: false },
@@ -406,6 +417,30 @@ static FOCUS_ED: AtomicI32 = AtomicI32::new(0);
 static INPUT_BRUSH: AtomicIsize = AtomicIsize::new(0);
 static KB_HOOK: AtomicIsize = AtomicIsize::new(0);
 static SEQ_OPEN: AtomicBool = AtomicBool::new(false);
+// Aktiviert/deaktiviert: Autoclicker, Dauerklick, Farb-Trigger, Makro
+static EN_AUTO: AtomicBool = AtomicBool::new(true);
+static EN_HOLD: AtomicBool = AtomicBool::new(true);
+static EN_TRIG: AtomicBool = AtomicBool::new(true);
+static EN_SEQ: AtomicBool = AtomicBool::new(true);
+
+fn en_flag(card: usize) -> &'static AtomicBool {
+    [&EN_AUTO, &EN_HOLD, &EN_TRIG, &EN_SEQ][card]
+}
+
+/// Zu welcher Funktion (0–3) gehoert ein Steuerelement? Am ID-Bereich erkennbar.
+fn card_of(id: i32) -> Option<usize> {
+    match id {
+        101..=199 => Some(0),
+        201..=299 => Some(1),
+        301..=399 => Some(2),
+        501..=599 => Some(3),
+        _ => None,
+    }
+}
+
+fn card_disabled(id: i32) -> bool {
+    card_of(id).is_some_and(|c| !en_flag(c).load(SeqCst))
+}
 static INFO_OPEN: AtomicBool = AtomicBool::new(false);
 
 struct Fonts {
@@ -756,7 +791,7 @@ fn read_auto_settings() {
 }
 
 fn toggle_auto() {
-    if AUTO_RUN.swap(false, SeqCst) {
+    if AUTO_RUN.swap(false, SeqCst) || !EN_AUTO.load(SeqCst) {
         return;
     }
     if read_pos(ID_A_X, ID_A_Y).is_err() {
@@ -788,7 +823,7 @@ fn toggle_auto() {
 fn toggle_hold() {
     if HOLD_ON.swap(false, SeqCst) {
         send_mouse(&[up_flag(HOLD_ACTIVE.load(SeqCst))]);
-    } else {
+    } else if EN_HOLD.load(SeqCst) {
         let Ok(pos) = read_pos(ID_H_X, ID_H_Y) else {
             msg_box("Dauerklick: Bitte bei Position X und Y ausfüllen oder beide Felder leer lassen.");
             return;
@@ -818,6 +853,9 @@ fn toggle_hold() {
 fn toggle_trigger() {
     if TRIG_RUN.swap(false, SeqCst) {
         PAUSED.store(false, SeqCst);
+        return;
+    }
+    if !EN_TRIG.load(SeqCst) {
         return;
     }
     let x = get_text(ID_T_X).trim().parse::<i32>().ok();
@@ -889,8 +927,42 @@ fn toggle_trigger() {
     });
 }
 
+/// Schaltet eine Funktion ein oder aus. Aus = stoppen, Hotkey freigeben, Karte ausgrauen.
+fn set_enabled(card: usize, on: bool) {
+    en_flag(card).store(on, SeqCst);
+    if !on {
+        match card {
+            0 => AUTO_RUN.store(false, SeqCst),
+            1 => {
+                if HOLD_ON.swap(false, SeqCst) {
+                    send_mouse(&[up_flag(HOLD_ACTIVE.load(SeqCst))]);
+                }
+            }
+            2 => {
+                TRIG_RUN.store(false, SeqCst);
+                PAUSED.store(false, SeqCst);
+            }
+            _ => SEQ_RUN.store(false, SeqCst),
+        }
+    }
+    if CAPTURE.load(SeqCst) == HK_BUTTONS[card] {
+        end_capture();
+    } else {
+        register_hotkeys();
+    }
+    unsafe {
+        let ids = BTNS.iter().map(|b| b.id).chain(EDS.iter().map(|e| e.id)).chain(LISTS.iter().map(|l| l.id));
+        for id in ids.filter(|id| card_of(*id) == Some(card)) {
+            EnableWindow(item(id), on as i32);
+        }
+        InvalidateRect(main_hwnd(), null(), 0);
+        InvalidateRect(item(LISTS[if card == 3 { 1 } else { 0 }].id), null(), 0);
+    }
+    invalidate_buttons();
+}
+
 fn toggle_seq() {
-    if SEQ_RUN.swap(false, SeqCst) {
+    if SEQ_RUN.swap(false, SeqCst) || !EN_SEQ.load(SeqCst) {
         return;
     }
     let steps = SEQ.lock().unwrap().clone();
@@ -1384,7 +1456,7 @@ fn register_hotkeys() {
     for (i, (vk, mods)) in keys.iter().enumerate() {
         unsafe {
             UnregisterHotKey(hwnd, i as i32 + 1);
-            if *vk != 0 && RegisterHotKey(hwnd, i as i32 + 1, mods | MOD_NOREPEAT, *vk) == 0 {
+            if *vk != 0 && en_flag(i).load(SeqCst) && RegisterHotKey(hwnd, i as i32 + 1, mods | MOD_NOREPEAT, *vk) == 0 {
                 failed.push(names[i]);
             }
         }
@@ -1732,7 +1804,31 @@ fn text_width(dc: HANDLE, t: &str, font: HANDLE) -> i32 {
 
 const VC: u32 = DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS;
 
+fn st_card(st: St) -> Option<usize> {
+    match st {
+        St::Auto => Some(0),
+        St::Hold => Some(1),
+        St::Trig => Some(2),
+        St::Seq => Some(3),
+        St::None => None,
+    }
+}
+
+/// Liegt ein Punkt (logische Pixel) in der Karte einer deaktivierten Funktion?
+fn disabled_at(x: i32, y: i32) -> bool {
+    CARDS.iter().any(|c| {
+        st_card(c.status).is_some_and(|i| !en_flag(i).load(SeqCst))
+            && x >= c.x
+            && x < c.x + c.w
+            && y >= c.y
+            && y < c.y + c.h
+    })
+}
+
 fn status_of(st: St) -> Option<(String, bool)> {
+    if st_card(st).is_some_and(|i| !en_flag(i).load(SeqCst)) {
+        return Some(("Deaktiviert".into(), false));
+    }
     Some(match st {
         St::None => return None,
         St::Auto => {
@@ -1814,7 +1910,7 @@ const HELP_LEFT: [&str; 3] = [
 const HELP_RIGHT: [&str; 3] = [
     "Hotkey ändern: Feld anklicken, Taste drücken. Esc = abbrechen, Entf = keiner.",
     "Loslassen nach 0 = erst per Hotkey. Cooldown 0 = keine Pause.",
-    "Andere pausieren: Autoclicker/Makro warten bis Ende des Cooldowns.",
+    "Schalter oben in jeder Karte: aus = gestoppt, Hotkey frei, Karte gesperrt.",
 ];
 
 fn paint_main(hwnd: HWND) {
@@ -1846,7 +1942,7 @@ fn paint_main(hwnd: HWND) {
                 g.rrect(sf(c.x), sf(c.y), sf(c.w), sf(c.h), sf(14), Some(p.card), Some(p.border));
             }
             for (c, _, on, tw) in &statuses {
-                let right = s(c.x + c.w - 16);
+                let right = s(c.x + c.w - 62);
                 let cy = sf(c.y + 25);
                 let d = sf(8);
                 let x = (right - tw - s(8)) as f32 - d;
@@ -1855,6 +1951,7 @@ fn paint_main(hwnd: HWND) {
             let focus = FOCUS_ED.load(SeqCst);
             for ed in EDS.iter().filter(|e| shown(e.id, e.seq)) {
                 let border = if ed.id == focus { p.accent } else { p.input_border };
+                let border = if card_disabled(ed.id) { p.border } else { border };
                 g.rrect(sf(ed.x), sf(ed.y), sf(ed.w), sf(30), sf(8), Some(p.input), Some(border));
             }
             for li in LISTS.iter().filter(|l| open || !l.seq) {
@@ -1901,13 +1998,14 @@ fn paint_main(hwnd: HWND) {
         text(m, "Strg+C speichert den aktuellen Wert", f.small, p.muted, s(32) + tw + s(12), s(556), s(300), s(26), VC);
 
         for (c, t, on, tw) in &statuses {
-            let right = s(c.x + c.w - 16);
+            let right = s(c.x + c.w - 62);
             text(m, t, f.small, if *on { p.accent } else { p.muted }, right - tw, s(c.y + 12), *tw, s(26), VC);
         }
 
         if open {
             for (y, lb) in editor_labels() {
-                text(m, lb, f.normal, p.text, s(816), s(y), s(78), s(30), VC);
+                let c = if EN_SEQ.load(SeqCst) { p.text } else { p.muted };
+                text(m, lb, f.normal, c, s(816), s(y), s(78), s(30), VC);
             }
             if let Some((y, hint)) = editor_hint() {
                 text(m, hint, f.small, p.muted, s(1058), s(y), s(146), s(30), VC);
@@ -1915,6 +2013,7 @@ fn paint_main(hwnd: HWND) {
         }
         for lb in LABELS.iter().filter(|l| open || !l.seq) {
             let (font, color, flags) = match lb.style {
+                0 if disabled_at(lb.x, lb.y) => (f.normal, p.muted, VC),
                 0 => (f.normal, p.text, VC),
                 1 => (f.small, p.muted, VC),
                 _ => (f.small, p.muted, VC | DT_RIGHT),
@@ -2021,6 +2120,9 @@ fn btn_active(id: i32) -> bool {
         ID_S_LOOP => SEQ_LOOP.load(SeqCst),
         ID_SEQ_TOGGLE => SEQ_OPEN.load(SeqCst),
         ID_INFO_TOGGLE => INFO_OPEN.load(SeqCst),
+        ID_EN_AUTO | ID_EN_HOLD | ID_EN_TRIG | ID_EN_SEQ => {
+            en_flag(ID_ENABLE.iter().position(|&e| e == id).unwrap_or(0)).load(SeqCst)
+        }
         _ => false,
     }
 }
@@ -2034,8 +2136,9 @@ fn draw_button(dis: &DRAWITEMSTRUCT) {
     let f = fonts();
     let header = matches!(def.kind, Kind::Icon | Kind::Ghost);
     let base = if header { p.bg } else { p.card };
-    let hover = HOVER.load(SeqCst) == dis.hwndItem;
-    let pressed = dis.itemState & ODS_SELECTED != 0;
+    let dim = card_disabled(id);
+    let hover = HOVER.load(SeqCst) == dis.hwndItem && !dim;
+    let pressed = dis.itemState & ODS_SELECTED != 0 && !dim;
     let focus = dis.itemState & ODS_FOCUS != 0 && dis.itemState & ODS_NOFOCUSRECT == 0;
     let active = btn_active(id);
     let label = btn_label(id);
@@ -2056,7 +2159,9 @@ fn draw_button(dis: &DRAWITEMSTRUCT) {
         match def.kind {
             Kind::Primary => {
                 font = f.btn;
-                if active {
+                if dim {
+                    g.rrect(0.0, 0.0, wf, hf, r, Some(p.sec), None);
+                } else if active {
                     g.rrect(0.0, 0.0, wf, hf, r, Some(p.accent_soft), Some(p.accent));
                     text_color = p.accent;
                 } else {
@@ -2071,7 +2176,9 @@ fn draw_button(dis: &DRAWITEMSTRUCT) {
             }
             Kind::Segment => {
                 font = f.btn;
-                if active {
+                if active && dim {
+                    g.rrect(0.0, 0.0, wf, hf, r, Some(p.sec_hover), Some(p.muted));
+                } else if active {
                     g.rrect(0.0, 0.0, wf, hf, r, Some(p.accent), None);
                     text_color = p.accent_text;
                 } else {
@@ -2099,7 +2206,15 @@ fn draw_button(dis: &DRAWITEMSTRUCT) {
             Kind::Switch => {
                 let (pw, ph) = (sf(36), sf(20));
                 let y = (hf - ph) / 2.0;
-                let track = if active { p.accent } else if hover { p.muted } else { p.input_border };
+                let track = if active && dim {
+                    p.muted
+                } else if active {
+                    p.accent
+                } else if hover {
+                    p.muted
+                } else {
+                    p.input_border
+                };
                 g.rrect(0.0, y, pw, ph, ph / 2.0, Some(track), None);
                 let k = ph - sf(4);
                 let kx = if active { pw - k - sf(2) } else { sf(2) };
@@ -2149,6 +2264,9 @@ fn draw_button(dis: &DRAWITEMSTRUCT) {
         }
     }
 
+    if dim {
+        text_color = p.muted;
+    }
     if !label.is_empty() {
         let tw = if def.kind == Kind::Dropdown || def.kind == Kind::Ghost { w - text_x - s(28) } else { w - text_x };
         text(m, &label, font, text_color, text_x, 0, tw, h, VC | align);
@@ -2196,6 +2314,7 @@ fn draw_list_item(dis: &DRAWITEMSTRUCT) {
                 Step::Wait(_) | Step::Goto(_) => p.muted,
                 _ => p.text,
             };
+            let c = if EN_SEQ.load(SeqCst) { c } else { p.muted };
             let t = st.describe();
             let font = if running { f.btn } else { f.normal };
             text(m, &t, font, if running { p.accent } else { c }, s(52), 0, w - s(60), h, VC);
@@ -2687,6 +2806,10 @@ fn on_command(hwnd: HWND, id: i32, code: u32) {
             SEQ_OPEN.fetch_xor(true, SeqCst);
             apply_layout(hwnd);
         }
+        ID_EN_AUTO | ID_EN_HOLD | ID_EN_TRIG | ID_EN_SEQ if clicked => {
+            let card = ID_ENABLE.iter().position(|&e| e == id).unwrap_or(0);
+            set_enabled(card, !en_flag(card).load(SeqCst));
+        }
         ID_INFO_TOGGLE if clicked => {
             INFO_OPEN.fetch_xor(true, SeqCst);
             apply_layout(hwnd);
@@ -2736,9 +2859,10 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             }
             1
         }
-        WM_CTLCOLOREDIT | WM_CTLCOLORLISTBOX => {
+        WM_CTLCOLOREDIT | WM_CTLCOLORLISTBOX | WM_CTLCOLORSTATIC => {
             let p = pal();
-            SetTextColor(wp as HANDLE, cref(p.text));
+            let color = if msg == WM_CTLCOLORSTATIC { p.muted } else { p.text };
+            SetTextColor(wp as HANDLE, cref(color));
             SetBkColor(wp as HANDLE, cref(p.input));
             INPUT_BRUSH.load(SeqCst)
         }

@@ -548,3 +548,10 @@ extern "system" {
 }
 pub const EM_SETCUEBANNER: u32 = 0x1501;
 pub const LBN_SELCHANGE: u32 = 1;
+
+pub const WM_CTLCOLORSTATIC: u32 = 0x0138;
+
+#[link(name = "user32")]
+extern "system" {
+    pub fn EnableWindow(h: HWND, enable: i32) -> i32;
+}
